@@ -4,6 +4,8 @@ Open-source LLM inference platform built for **Social Space Wars** — a galaxy-
 
 **This repo is the server** — the inference backbone that serves models over an OpenAI-compatible API. The NPC agent logic (memory, doctrine, action selection, context engineering) lives client-side. This server doesn't know or care what the agents do; it just serves tokens fast.
 
+For non-game and non-SSW deployments, use `docs/USING_OUTSIDE_SSW.md`.
+
 ## Why This Exists
 
 The research below shaped the *client-side* agent design for SSW — not this server directly. We include it here for context on what this infrastructure is built to support: large-scale autonomous NPC populations that need reliable, high-throughput inference.

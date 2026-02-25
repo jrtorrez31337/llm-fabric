@@ -1,0 +1,49 @@
+# SSW AI — Observability Stack (Prometheus + Grafana)
+#
+# Run with the same project name as the vLLM stack so both share sswai_default
+# network and Prometheus can reach model-0..3 by service name.
+#
+# Usage (standalone):
+#   docker compose -p sswai -f docker-compose.observability.yml up -d
+#
+# Or use start-14b-4worker.sh which starts both stacks together.
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ssw-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+    ports:
+      - "0.0.0.0:9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ssw-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: sswai
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "0.0.0.0:3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:

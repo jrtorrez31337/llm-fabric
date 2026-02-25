@@ -64,7 +64,7 @@ Loader Service (:8001)  ─── 127.0.0.1 only
 Design Decisions (LOCKED):
 - Serving engine: vLLM
 - Model discovery: auto-scan /data/models, merge with models.yaml overrides
-- Default models: Qwen3-4B-AWQ (light+heavy aliases, pinned) — 14B available on-demand via loader
+- Default aliases are profile-driven; active runtime (2026-02-22) maps `light` + `heavy` to Qwen3-4B-Instruct-2507-AWQ in one-model-per-GPU profile
 - Available models: 9 vLLM-compatible models on disk (5 AWQ, 4 BF16)
 - Routing: registry-driven alias resolution → least-loaded routing across healthy workers per pool
 - Burst handling: vLLM's continuous batcher absorbs concurrency natively
@@ -91,9 +91,9 @@ Available Models (9 vLLM-compatible):
 - Orion-zhen/Qwen2.5-7B-Instruct-Uncensored: ~15.2GB VRAM, qwen2, BF16
 - thirdeyeai/DeepSeek-R1-Distill-Qwen-14B-uncensored: ~29.6GB VRAM, qwen2, BF16
 
-Alias/pinning are profile-driven from `gateway/models.yaml` (production) or `gateway/models.bakeoff.yaml` (bakeoff).
+Alias/pinning are profile-driven from `gateway/models.yaml` (mixed/all-light), `gateway/models.one-model-per-gpu.yaml` (one-model), or `gateway/models.bakeoff.yaml` (bakeoff).
 
-GPU Allocation — Two Configurations Available:
+GPU Allocation — Four Configurations Available:
 
 Config A (mixed, docker-compose.yml + .env):
 - GPU 0: heavy-0 (14B, 0.50) + light-0 (4B, 0.40) = 90% utilization
@@ -115,22 +115,39 @@ Config C (bakeoff control plane, docker-compose.bakeoff.yml + .env.bakeoff):
   - `heavy`/`candidate` → `Qwen/Qwen3-4B-Instruct-2507-AWQ` (first challenger)
 - Purpose: controlled candidate model trials without mutating the primary stack
 
-Production Metrics (2026-02-22 snapshot, 11h window):
+Config D (one-model-per-GPU, docker-compose.one-model-per-gpu.yml + .env.one-model-per-gpu):
+- GPU 0: model-0 (Qwen3-4B-Instruct-2507-AWQ, served-model-name=light)
+- GPU 1: model-1 (Qwen3-4B-Instruct-2507-AWQ, served-model-name=light)
+- 2 workers total (one per GPU), gateway routes both `light` and `heavy` aliases to this pool
+- 32K context enabled (`VLLM_MAX_MODEL_LEN=32768`) with tuned batching (`max_num_seqs=64`, `max_num_batched_tokens=65536`)
+- Switch: docker compose -p sswai -f docker-compose.one-model-per-gpu.yml --env-file .env.one-model-per-gpu up -d
+
+Historical Production Metrics (2026-02-22 snapshot, 11h window, mixed-era):
 - 6,913 requests total: heavy 5,024 (72.7%), light 1,889 (27.3%)
 - Avg latency: heavy 8.0s, light 5.5s — fleet P50 6.0s (per Codex audit)
 - Prefix cache hit rate: heavy 63%, light 24%
 - 0 errors, 0 queue pressure, 0 KV cache saturation
 - All 4 workers healthy, balanced load (heavy-0:2527, heavy-1:2497, light-0:943, light-1:946)
 
+Current Runtime Snapshot (2026-02-22 21:14 UTC):
+- Active stack: one-model-per-GPU (project `sswai`)
+- Healthy services: redis + model-0 + model-1 + gateway + loader
+- Gateway `/health`: status=ok, 2/2 workers healthy
+- `/v1/models/status`: Qwen/Qwen3-4B-Instruct-2507-AWQ loaded with 2 healthy workers
+- Alias checks: both `light` and `heavy` chat completions return 200
+
 Key Files:
 - docker-compose.yml — 7 services: redis, heavy-0/1, light-0/1, gateway, loader
 - docker-compose.all-light.yml — 13 services: redis, light-0..9, gateway, loader
 - docker-compose.bakeoff.yml — isolated bakeoff stack (redis, gateway, loader)
+- docker-compose.one-model-per-gpu.yml — 5 services: redis, model-0/1, gateway, loader (one static worker per GPU)
+- .env.one-model-per-gpu — one-model profile env (32K context, batching controls, model selection)
 - gateway/main.py — FastAPI, registry routing, streaming, failover, queue, metrics
 - gateway/config.py — WorkerPool (thread-safe round-robin), PoolManager, Settings
 - gateway/registry.py — model discovery, config.json parsing, models.yaml merging
 - gateway/request_queue.py — Redis pub/sub queue for unloaded model requests
 - gateway/models.yaml — per-model overrides (VRAM, aliases, pinned, max_model_len)
+- gateway/models.one-model-per-gpu.yaml — one-model alias/pinning profile (`light` + `heavy` mapped to Qwen3-4B-Instruct-2507-AWQ)
 - gateway/models.bakeoff.yaml — bakeoff alias/pinning profile for candidate trials
 - loader/loader.py — Docker SDK container lifecycle, GPU placement, LRU eviction
 - scripts/load_test.py — concurrent load testing tool
@@ -154,7 +171,9 @@ Implementation Status:
 9. ✅ All-Light Config — 10× Qwen3-4B-AWQ workers (5/GPU), "heavy" alias → light pool
 10. ✅ Alias Compatibility Hardening — `/v1/models` publishes alias IDs; `/v1/models/{alias}` resolves alias IDs; chat responses preserve caller-requested model alias for stream + non-stream
 11. ✅ Bakeoff Scaffolding — standalone bakeoff compose/env/model-profile/runbook added for controlled candidate testing
-12. Next: Observability — per-tick `resolved_model` + `worker_id` + `queue_wait_ms`, plus static-worker GPU accounting in loader status path
+12. ✅ One-Model-Per-GPU Profile — added `docker-compose.one-model-per-gpu.yml` + `.env.one-model-per-gpu` + `gateway/models.one-model-per-gpu.yaml` (32K-ready, one static worker per GPU)
+13. ✅ Runtime Switch Executed — stopped all-light stack and brought up one-model-per-GPU stack; verified health + alias chat responses
+14. Next: Observability — per-tick `resolved_model` + `worker_id` + `queue_wait_ms`, plus static-worker GPU accounting in loader status path
 
 ---
 
