@@ -145,10 +145,12 @@ Measured Performance — Config E, 14B-4worker (2026-02-25, Prometheus data, 11,
 - Practical agent capacity: 15-18 max (KV-bound at avg prompt size)
 - KV saturated at 100% during 15-agent warpack when model-0 was partially out of pool
 
-Current Runtime Snapshot (2026-02-26):
-- Stack: DOWN — server being physically moved
-- Last active: Config E (14b-4worker), 4/4 workers healthy, 12 agents connected
-- To restart: cd /home/jon/sswai && ./start-14b-4worker.sh
+Current Runtime Snapshot (2026-03-05):
+- Stack: Config D (one-model-per-GPU) — UP, all 7 services healthy after power reset
+- model-0 (GPU 0) + model-1 (GPU 1): Qwen3-4B-Instruct-2507-AWQ, both healthy
+- Gateway: 2/2 workers healthy, port 8000
+- Observability: Prometheus :9090, Grafana :3000 (admin/sswai)
+- To switch to 14B (4 workers): cd /home/jon/sswai && ./start-14b-4worker.sh
 
 Key Files:
 - start-14b-4worker.sh — start both vLLM + observability stacks (primary entry point)
