@@ -64,8 +64,8 @@ Loader Service (:8001)  ─── 127.0.0.1 only
 Design Decisions (LOCKED):
 - Serving engine: vLLM
 - Model discovery: auto-scan /data/models, merge with models.yaml overrides
-- Default aliases are profile-driven; active runtime (2026-02-26) maps `light` + `heavy` to Qwen3-14B-AWQ across all 4 workers in 14b-4worker profile
-- Available models: 9 vLLM-compatible models on disk (5 AWQ, 4 BF16)
+- Default aliases are profile-driven; active runtime (2026-03-05) maps `light` + `heavy` to Qwen3-32B-AWQ across 2 workers in 32b-1per-gpu profile
+- Available models: 10 vLLM-compatible models on disk (6 AWQ, 4 BF16)
 - Routing: registry-driven alias resolution → least-loaded routing across healthy workers per pool
 - Burst handling: vLLM's continuous batcher absorbs concurrency natively
 - Redis role: metrics storage only (latency, tokens, error tracking) — request queue only for unloaded model waiting
@@ -85,15 +85,16 @@ Available Models (9 vLLM-compatible):
 - Qwen/Qwen3-4B-AWQ: ~2.8GB VRAM, qwen3, AWQ, hermes parser
 - Qwen/Qwen3-8B-AWQ: ~6.4GB VRAM, qwen3, AWQ
 - Qwen/Qwen3-14B-AWQ: ~10.4GB VRAM, qwen3, AWQ
+- Qwen/Qwen3-32B-AWQ: ~18.5GB VRAM, qwen3, AWQ, 64 layers, 8 KV heads
 - Qwen/Qwen3-4B-Instruct-2507-AWQ: ~2.8GB VRAM, qwen3, AWQ
 - meta-llama/Llama-3.1-8B-Instruct: ~16GB VRAM, llama, BF16, llama3_json parser
 - mistralai/Mistral-7B-Instruct-v0.2: ~14.8GB VRAM, mistral, BF16, mistral parser
 - Orion-zhen/Qwen2.5-7B-Instruct-Uncensored: ~15.2GB VRAM, qwen2, BF16
 - thirdeyeai/DeepSeek-R1-Distill-Qwen-14B-uncensored: ~29.6GB VRAM, qwen2, BF16
 
-Alias/pinning are profile-driven from `gateway/models.yaml` (mixed/all-light), `gateway/models.14b-4worker.yaml` (14b-4worker, current), `gateway/models.one-model-per-gpu.yaml` (one-model), or `gateway/models.bakeoff.yaml` (bakeoff).
+Alias/pinning are profile-driven from `gateway/models.32b-1per-gpu.yaml` (32b, current), `gateway/models.14b-4worker.yaml` (14b-4worker), `gateway/models.yaml` (mixed/all-light), `gateway/models.one-model-per-gpu.yaml` (one-model), or `gateway/models.bakeoff.yaml` (bakeoff).
 
-GPU Allocation — Five Configurations Available:
+GPU Allocation — Six Configurations Available:
 
 Config A (mixed, docker-compose.yml + .env):
 - GPU 0: heavy-0 (14B, 0.50) + light-0 (4B, 0.40) = 90% utilization
@@ -122,7 +123,7 @@ Config D (one-model-per-GPU, docker-compose.one-model-per-gpu.yml + .env.one-mod
 - 32K context enabled (`VLLM_MAX_MODEL_LEN=32768`) with tuned batching (`max_num_seqs=64`, `max_num_batched_tokens=65536`)
 - Switch: docker compose -p sswai -f docker-compose.one-model-per-gpu.yml --env-file .env.one-model-per-gpu up -d
 
-Config E (14b-4worker, docker-compose.14b-4worker.yml + .env.14b-4worker) — CURRENT PROFILE:
+Config E (14b-4worker, docker-compose.14b-4worker.yml + .env.14b-4worker):
 - GPU 0: model-0 + model-1 (Qwen3-14B-AWQ, sequential load, 0.46 gpu-mem-util each)
 - GPU 1: model-2 + model-3 (Qwen3-14B-AWQ, sequential load, 0.46 gpu-mem-util each)
 - 4 workers total, both `light` and `heavy` aliases route to all 4
@@ -130,6 +131,15 @@ Config E (14b-4worker, docker-compose.14b-4worker.yml + .env.14b-4worker) — CU
 - max_num_batched_tokens=16,384 (chunked prefill — 48K prompts handled transparently)
 - KV blocks per worker: ~3,600-4,168 (GPU 1 workers larger; GPU 1 has 3GB more VRAM)
 - Switch: ./start-14b-4worker.sh  (starts vLLM + observability together)
+
+Config F (32b-1per-gpu, docker-compose.32b-1per-gpu.yml + .env.32b-1per-gpu) — CURRENT PROFILE:
+- GPU 0: model-0 (Qwen3-32B-AWQ, 0.90 gpu-mem-util, ~38.8GB used)
+- GPU 1: model-1 (Qwen3-32B-AWQ, 0.90 gpu-mem-util, ~41.6GB used)
+- 2 workers total, both `light` and `heavy` aliases route to both
+- 49,152 token context via YaRN rope scaling (factor 1.2 × native 40,960)
+- max_num_batched_tokens=16,384, max_num_seqs=32
+- KV budget: ~6.7-6.9GB per GPU after weights (256KB/token, ~27K tokens KV per worker)
+- Switch: ./start-32b.sh / ./stop-32b.sh
 
 Historical Production Metrics (2026-02-22 snapshot, 11h window, mixed-era):
 - 6,913 requests total: heavy 5,024 (72.7%), light 1,889 (27.3%)
@@ -146,16 +156,19 @@ Measured Performance — Config E, 14B-4worker (2026-02-25, Prometheus data, 11,
 - KV saturated at 100% during 15-agent warpack when model-0 was partially out of pool
 
 Current Runtime Snapshot (2026-03-05):
-- Stack: Config D (one-model-per-GPU) — UP, all 7 services healthy after power reset
-- model-0 (GPU 0) + model-1 (GPU 1): Qwen3-4B-Instruct-2507-AWQ, both healthy
+- Stack: Config F (32b-1per-gpu) — UP, all 7 services healthy
+- model-0 (GPU 0, 38.8GB) + model-1 (GPU 1, 41.6GB): Qwen3-32B-AWQ, both healthy
 - Gateway: 2/2 workers healthy, port 8000
 - Observability: Prometheus :9090, Grafana :3000 (admin/sswai)
-- To switch to 14B (4 workers): cd /home/jon/sswai && ./start-14b-4worker.sh
+- Scripts: ./start-32b.sh, ./stop-32b.sh
 
 Key Files:
-- start-14b-4worker.sh — start both vLLM + observability stacks (primary entry point)
-- docker-compose.14b-4worker.yml — CURRENT: 4 workers, 2/GPU, YaRN 48K context
-- .env.14b-4worker — CURRENT profile env (gpu_mem_util=0.46, max_model_len=49152, batched_tokens=16384)
+- start-32b.sh / stop-32b.sh — CURRENT: start/stop 32B stack + observability
+- docker-compose.32b-1per-gpu.yml — CURRENT: 2 workers, 1/GPU, Qwen3-32B-AWQ, YaRN 48K context
+- .env.32b-1per-gpu — CURRENT profile env (gpu_mem_util=0.90, max_model_len=49152)
+- start-14b-4worker.sh — start 14B-4worker stack + observability
+- docker-compose.14b-4worker.yml — 4 workers, 2/GPU, Qwen3-14B-AWQ, YaRN 48K context
+- .env.14b-4worker — 14B profile env (gpu_mem_util=0.46, max_model_len=49152, batched_tokens=16384)
 - docker-compose.observability.yml — Prometheus + Grafana, shares sswai_default network
 - prometheus/prometheus.yml — scrapes model-0..3:8000 at 15s interval
 - grafana/dashboards/vllm.json — 12-panel vLLM dashboard (auto-provisioned)
@@ -168,7 +181,8 @@ Key Files:
 - gateway/registry.py — model discovery, config.json parsing, models.yaml merging
 - gateway/request_queue.py — Redis pub/sub queue for unloaded model requests
 - gateway/models.yaml — per-model overrides (VRAM, aliases, pinned, max_model_len)
-- gateway/models.14b-4worker.yaml — CURRENT: Qwen3-14B-AWQ pinned, aliases [light, heavy], 49K context
+- gateway/models.32b-1per-gpu.yaml — CURRENT: Qwen3-32B-AWQ pinned, aliases [light, heavy], 49K context
+- gateway/models.14b-4worker.yaml — Qwen3-14B-AWQ pinned, aliases [light, heavy], 49K context
 - gateway/models.one-model-per-gpu.yaml — one-model alias/pinning profile
 - gateway/models.bakeoff.yaml — bakeoff alias/pinning profile for candidate trials
 - loader/loader.py — Docker SDK container lifecycle, GPU placement, LRU eviction
@@ -198,7 +212,8 @@ Implementation Status:
 14. ✅ 14B-4Worker Profile — Qwen3-14B-AWQ × 4 workers (2/GPU), 49,152-token context via YaRN rope scaling (factor 1.2), sequential GPU startup, Config E
 15. ✅ Observability — Prometheus + Grafana auto-provisioned; 12-panel dashboard (TTFT, E2E latency, TPOT, KV cache, throughput, preemptions); 0.0.0.0 bound for ZeroTier access
 16. ✅ Capacity Analysis — measured 14B stack: TTFT p50 38.9s under load, 12.6s at 12 agents; practical max 15-18 agents (KV-bound at avg 9,716 tokens/request); 134:1 input:output ratio confirms pure prefill workload
-17. Next: Combat doctrine update — agents detect hostiles but never engage (audit #82); weapon slot IDs need surfacing in combat context
+17. ✅ 32B-1per-GPU Profile — Qwen3-32B-AWQ × 2 workers (1/GPU, 0.90 util), 49K context via YaRN, ~6.7-6.9GB KV per worker, Config F
+18. Next: Combat doctrine update — agents detect hostiles but never engage (audit #82); weapon slot IDs need surfacing in combat context
 
 ---
 

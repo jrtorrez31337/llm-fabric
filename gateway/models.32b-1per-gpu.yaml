@@ -1,0 +1,9 @@
+models:
+  Qwen/Qwen3-32B-AWQ:
+    vram_mb: 18500
+    kv_reserve_mb: 22000
+    aliases:
+      - light
+      - heavy
+    pinned: true
+    max_model_len: 49152
