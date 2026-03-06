@@ -4,9 +4,9 @@
 #   GPU 0: model-0 (:8001)  0.90 gpu-mem-util (~17GB weights, ~26GB KV)
 #   GPU 1: model-1 (:8002)  0.90 gpu-mem-util (~17GB weights, ~26GB KV)
 #
-# MoE: 30B total params, 3B active per token — fast inference.
+# MoE: 30B total params, 128 experts, 8 active per token — fast inference.
 # Both "light" and "heavy" aliases route to both workers.
-# Context: 32,768 tokens (native 128K, capped for KV headroom).
+# Context: 49,152 tokens (native 262K, no rope scaling needed).
 #
 # Usage:
 #   docker compose -p sswai -f docker-compose.30b-moe.yml --env-file .env.30b-moe up -d
