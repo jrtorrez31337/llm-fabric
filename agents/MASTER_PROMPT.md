@@ -64,7 +64,7 @@ Loader Service (:8001)  ─── 127.0.0.1 only
 Design Decisions (LOCKED):
 - Serving engine: vLLM
 - Model discovery: auto-scan /data/models, merge with models.yaml overrides
-- Default aliases are profile-driven; active runtime (2026-03-06) maps `light` + `heavy` to Qwen3-32B-AWQ on 1 worker (GPU 1 only) in 32b-gpu1 profile
+- Default aliases are profile-driven; active runtime (2026-03-06) maps `light` + `heavy` to Qwen3-32B-AWQ on 2 workers (1/GPU) in 32b-1per-gpu profile (Config F)
 - Available models: 10 vLLM-compatible models on disk (6 AWQ, 4 BF16)
 - Routing: registry-driven alias resolution → least-loaded routing across healthy workers per pool
 - Burst handling: vLLM's continuous batcher absorbs concurrency natively
@@ -141,7 +141,7 @@ Config F (32b-1per-gpu, docker-compose.32b-1per-gpu.yml + .env.32b-1per-gpu):
 - KV budget: ~6.7-6.9GB per GPU after weights (256KB/token, ~27K tokens KV per worker)
 - Switch: ./start-32b.sh / ./stop-32b.sh
 
-Config G (32b-gpu1, docker-compose.32b-gpu1.yml + .env.32b-gpu1) — CURRENT PROFILE:
+Config G (32b-gpu1, docker-compose.32b-gpu1.yml + .env.32b-gpu1):
 - GPU 0: FREE — available for other workloads
 - GPU 1: model-0 (Qwen3-32B-AWQ, 0.90 gpu-mem-util, ~41.6GB used)
 - 1 worker total, both `light` and `heavy` aliases route to it
@@ -162,27 +162,31 @@ Measured Performance — Config E, 14B-4worker (2026-02-25, Prometheus data, 11,
 - Practical agent capacity: 15-18 max (KV-bound at avg prompt size)
 - KV saturated at 100% during 15-agent warpack when model-0 was partially out of pool
 
+Measured Performance — Config F, 32B-1per-gpu (2026-03-06, Prometheus data):
+- Initial ramp (47 requests, 3 agents): TTFT avg 12.2s, E2E avg 26.6s — near-sequential, not representative
+- Sustained load (294 requests/30m, ~10-12 agents): TTFT avg 38.4s, E2E avg 69.7s, 44 preemptions
+- Both workers hit 99%+ KV cache under sustained load; 12 requests queued on model-0
+- KV blocks: model-0 4,794 (76K tokens), model-1 5,480 (88K tokens) — ~13 concurrent max
+- 32B is 2.7× slower than 14B at equivalent agent count (70s vs 26s E2E at 12 agents)
+- Thinking suppression fix: YAML format bug caused `<think>` token leak (8.3% parse failures); fixed by correcting models.32b-1per-gpu.yaml to list format; 0% length truncations after fix
+- Trade-off vs 14B: higher reasoning quality / game depth, but saturated at 10-12 agents
+- Quality bakeoff in progress: 32B hour-long run complete, Config E (14B) comparison run pending
+
 Current Runtime Snapshot (2026-03-06):
-- Stack: Config G (32b-gpu1) — UP, all 6 services healthy
-- GPU 0: FREE (0 MiB used)
-- GPU 1: model-0 (Qwen3-32B-AWQ, 41.6GB)
-- Gateway: 1/1 workers healthy, port 8000
-- Observability: Prometheus :9090, Grafana :3000 (admin/sswai)
-- Scripts: ./start-32b-gpu1.sh
+- Stack: DOWN — all containers stopped, both GPUs free
+- Pending: Config E (14B × 4) quality comparison run
+- To restart: ./start-14b-4worker.sh (Config E) or ./start-32b.sh (Config F) or ./start-32b-gpu1.sh (Config G)
 
 Key Files:
-- start-32b-gpu1.sh — CURRENT: start 32B on GPU 1 only + observability
-- docker-compose.32b-gpu1.yml — CURRENT: 1 worker on GPU 1, Qwen3-32B-AWQ, YaRN 48K context
-- .env.32b-gpu1 — CURRENT profile env (gpu_mem_util=0.90, GPU 0 free)
-- start-32b.sh / stop-32b.sh — start/stop 32B on both GPUs
-- docker-compose.32b-1per-gpu.yml — 2 workers, 1/GPU, Qwen3-32B-AWQ, YaRN 48K context
-- .env.32b-1per-gpu — 32B both-GPU profile env (gpu_mem_util=0.90, max_model_len=49152)
-- start-14b-4worker.sh — start 14B-4worker stack + observability
-- docker-compose.14b-4worker.yml — 4 workers, 2/GPU, Qwen3-14B-AWQ, YaRN 48K context
-- .env.14b-4worker — 14B profile env (gpu_mem_util=0.46, max_model_len=49152, batched_tokens=16384)
+- start-14b-4worker.sh / stop-14b-4worker.sh — start/stop Config E (14B × 4) + observability
+- start-32b.sh / stop-32b.sh — start/stop Config F (32B × 2) + observability
+- start-32b-gpu1.sh — start Config G (32B GPU 1 only) + observability
+- docker-compose.14b-4worker.yml + .env.14b-4worker — Config E: 4 workers 2/GPU, 14B-AWQ, 49K context
+- docker-compose.32b-1per-gpu.yml + .env.32b-1per-gpu — Config F: 2 workers 1/GPU, 32B-AWQ, 49K context
+- docker-compose.32b-gpu1.yml + .env.32b-gpu1 — Config G: 1 worker GPU 1, 32B-AWQ, 49K context
 - docker-compose.observability.yml — Prometheus + Grafana, shares sswai_default network
-- prometheus/prometheus.yml — scrapes model-0..3:8000 at 15s interval
-- grafana/dashboards/vllm.json — 12-panel vLLM dashboard (auto-provisioned)
+- prometheus/prometheus.{14b-4worker,32b,32b-gpu1}.yml — per-profile scrape configs (copied to prometheus.yml by start scripts)
+- grafana/dashboards/vllm.json — 12-panel vLLM dashboard (auto-provisioned, ratio-based health thresholds)
 - docker-compose.yml — 7 services: redis, heavy-0/1, light-0/1, gateway, loader
 - docker-compose.all-light.yml — 13 services: redis, light-0..9, gateway, loader
 - docker-compose.bakeoff.yml — isolated bakeoff stack (redis, gateway, loader)
@@ -192,7 +196,7 @@ Key Files:
 - gateway/registry.py — model discovery, config.json parsing, models.yaml merging
 - gateway/request_queue.py — Redis pub/sub queue for unloaded model requests
 - gateway/models.yaml — per-model overrides (VRAM, aliases, pinned, max_model_len)
-- gateway/models.32b-1per-gpu.yaml — CURRENT: Qwen3-32B-AWQ pinned, aliases [light, heavy], 49K context
+- gateway/models.32b-1per-gpu.yaml — Qwen3-32B-AWQ pinned, aliases [light, heavy], 49K context
 - gateway/models.14b-4worker.yaml — Qwen3-14B-AWQ pinned, aliases [light, heavy], 49K context
 - gateway/models.one-model-per-gpu.yaml — one-model alias/pinning profile
 - gateway/models.bakeoff.yaml — bakeoff alias/pinning profile for candidate trials
@@ -225,7 +229,10 @@ Implementation Status:
 16. ✅ Capacity Analysis — measured 14B stack: TTFT p50 38.9s under load, 12.6s at 12 agents; practical max 15-18 agents (KV-bound at avg 9,716 tokens/request); 134:1 input:output ratio confirms pure prefill workload
 17. ✅ 32B-1per-GPU Profile — Qwen3-32B-AWQ × 2 workers (1/GPU, 0.90 util), 49K context via YaRN, ~6.7-6.9GB KV per worker, Config F
 18. ✅ 32B-GPU1-Only Profile — Qwen3-32B-AWQ × 1 worker on GPU 1, GPU 0 free, Config G
-19. Next: Combat doctrine update — agents detect hostiles but never engage (audit #82); weapon slot IDs need surfacing in combat context
+19. ✅ 32B Performance Baseline — sustained load: 38.4s TTFT, 69.7s E2E, 99% KV, 44 preemptions at 10-12 agents; 2.7× slower than 14B at equivalent load (yaklog ops#103, #109, #112)
+20. ✅ Thinking Suppression Fix — models.32b-1per-gpu.yaml YAML format bug caused `<think>` token leak (8.3% parse failures); fixed to list format; 0% truncations after fix (yaklog handoff#110)
+21. ✅ Profile-Aware Observability — per-profile Prometheus scrape configs (14b-4worker, 32b, 32b-gpu1); start scripts auto-select; Grafana dashboard uses ratio-based health thresholds (works for any worker count)
+22. Next: 14B vs 32B quality bakeoff — 32B hour-long run complete, Config E comparison pending; assess game depth vs throughput trade-off
 
 ---
 

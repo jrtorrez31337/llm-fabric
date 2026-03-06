@@ -14,6 +14,9 @@ for arg in "$@"; do
   [[ "$arg" == "--no-obs" ]] && OBS=false
 done
 
+# Select Prometheus config for 4-worker scrape targets
+cp prometheus/prometheus.14b-4worker.yml prometheus/prometheus.yml
+
 echo "==> Starting vLLM stack  (Qwen3-14B-AWQ × 4 workers, 48K context)..."
 docker compose \
   -p sswai \
@@ -31,8 +34,8 @@ fi
 
 echo ""
 echo "Stack ready:"
-echo "  Gateway     http://localhost:8000"
-echo "  Prometheus  http://localhost:9090"
+echo "  Gateway     http://localhost:8000  (4 workers, 2/GPU)"
 if $OBS; then
+  echo "  Prometheus  http://localhost:9090"
   echo "  Grafana     http://localhost:3000  (admin / sswai)"
 fi

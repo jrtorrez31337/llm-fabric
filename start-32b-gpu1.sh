@@ -12,6 +12,9 @@ for arg in "$@"; do
   [[ "$arg" == "--no-obs" ]] && OBS=false
 done
 
+# Select Prometheus config for 1-worker scrape target
+cp prometheus/prometheus.32b-gpu1.yml prometheus/prometheus.yml
+
 echo "==> Starting vLLM stack  (Qwen3-32B-AWQ × 1 worker, GPU 1 only)..."
 docker compose \
   -p sswai \

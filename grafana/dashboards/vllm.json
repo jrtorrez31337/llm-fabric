@@ -1,7 +1,7 @@
 {
   "title": "vLLM — SSW AI Inference",
   "uid": "sswai-vllm",
-  "description": "Real-time metrics for Qwen3-14B-AWQ × 4 workers",
+  "description": "Real-time metrics for vLLM workers",
   "schemaVersion": 38,
   "version": 1,
   "refresh": "30s",
@@ -149,7 +149,7 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "count(up{job=\"vllm-workers\"} == 1)",
+          "expr": "count(up{job=\"vllm-workers\"} == 1) / count(up{job=\"vllm-workers\"})",
           "legendFormat": "healthy",
           "refId": "A"
         }
@@ -163,14 +163,14 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "percentunit",
           "color": { "mode": "thresholds" },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "red", "value": null },
-              { "color": "yellow", "value": 3 },
-              { "color": "green", "value": 4 }
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 1 }
             ]
           }
         },
