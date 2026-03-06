@@ -173,20 +173,37 @@ Measured Performance — Config E, 14B-4worker (2026-02-25, Prometheus data, 11,
 - Practical agent capacity: 15-18 max (KV-bound at avg prompt size)
 - KV saturated at 100% during 15-agent warpack when model-0 was partially out of pool
 
-Measured Performance — Config F, 32B-1per-gpu (2026-03-06, Prometheus data):
-- Initial ramp (47 requests, 3 agents): TTFT avg 12.2s, E2E avg 26.6s — near-sequential, not representative
-- Sustained load (294 requests/30m, ~10-12 agents): TTFT avg 38.4s, E2E avg 69.7s, 44 preemptions
-- Both workers hit 99%+ KV cache under sustained load; 12 requests queued on model-0
-- KV blocks: model-0 4,794 (76K tokens), model-1 5,480 (88K tokens) — ~13 concurrent max
-- 32B is 2.7× slower than 14B at equivalent agent count (70s vs 26s E2E at 12 agents)
-- Thinking suppression fix: YAML format bug caused `<think>` token leak (8.3% parse failures); fixed by correcting models.32b-1per-gpu.yaml to list format; 0% length truncations after fix
-- Trade-off vs 14B: higher reasoning quality / game depth, but saturated at 10-12 agents
-- Quality bakeoff in progress: 32B hour-long run complete, Config E (14B) comparison run pending
+Measured Performance — Config E, 14B-4worker (2026-03-06, Prometheus data, 1,717 requests, model-3 fix applied):
+- TTFT p50: 25.2s, p95: 76.1s, avg: 27.3s
+- E2E p50: 42.9s, p95: 108.4s, avg: 43.3s
+- Queue avg: 9.7s, Prefill avg: 12.2s, Decode avg: 16.7s, TPOT p50: 111ms
+- Avg prompt: 8,564 | Avg gen: 69 | Ratio: 124:1
+- KV peak: 99.9% (GPU 0), 95.8% (GPU 1) | Preemptions: 95 (GPU 0: 70, GPU 1: 25)
+- model-3 routing fix confirmed: all 4 workers balanced (416-454 requests, 9% max spread)
+- Prefix cache hit rate: 21.6%
+
+Measured Performance — Config F, 32B-1per-gpu (2026-03-06, Prometheus data, 420 requests):
+- TTFT p50: 36.5s, p95: 129.8s, avg: 57.3s
+- E2E p50: 55.3s, p95: 113.3s, avg: 77.1s
+- Queue avg: 16.3s, Prefill avg: 18.3s, Decode avg: 34.8s, TPOT p50: 93ms
+- Avg prompt: 9,080 | Avg gen: 72 | Ratio: 126:1
+- KV peak: 100.0% (both workers) | Preemptions: 67 (33.5/worker)
+- Peak waiting: 17-18 per worker (vs 10-12 for 14B)
+- Prefix cache hit rate: 15.3%
+- 0 aborted, 0 length-exceeded — thinking suppression fix holding
+
+Bakeoff Verdict (Config E vs F, same code, same session, 12 agents):
+- 14B serves 4.1× more requests/hr (1,717 vs 420)
+- 14B is 2.1× faster TTFT avg (27s vs 57s), 1.8× faster E2E avg (43s vs 77s)
+- Both hit KV saturation at 12 agents; 32B per-worker preemption rate is higher
+- 14B wins all infra metrics; 32B quality advantage remains unquantified (no matching behavioral audit)
+- Config E (14B×4) recommended for production
 
 Current Runtime Snapshot (2026-03-06):
-- Stack: Config E (14B × 4) RUNNING — 12-agent warpack quality bakeoff in progress
-- Config H (30B MoE) staged and ready for trial after E bakeoff completes
-- To switch: ./stop-14b-4worker.sh then ./start-30b-moe.sh (Config H) or ./start-32b.sh (Config F)
+- Stack: DOWN — all containers stopped, both GPUs free
+- Bakeoff complete: Config E (14B) vs Config F (32B) — 14B wins all infra metrics (yaklog infra#132, #134)
+- Config H (30B MoE) staged, untested — next trial candidate
+- To restart: ./start-14b-4worker.sh (Config E) or ./start-30b-moe.sh (Config H) or ./start-32b.sh (Config F)
 
 Key Files:
 - start-14b-4worker.sh / stop-14b-4worker.sh — start/stop Config E (14B × 4) + observability
@@ -253,7 +270,8 @@ Implementation Status:
 21. ✅ Profile-Aware Observability — per-profile Prometheus scrape configs (14b-4worker, 32b, 32b-gpu1); start scripts auto-select; Grafana dashboard uses ratio-based health thresholds (works for any worker count)
 22. ✅ Health Check Resilience — model-3 routing fix: require 3 consecutive health failures before worker exclusion (was instant); added recovery logging; prevents transient timeout under load from permanently dropping a worker
 23. ✅ 30B MoE Profile — Qwen3-30B-A3B-Instruct-2507-AWQ (MoE, 128 experts, 8 active/token) downloaded, Config H fully staged; also evaluated Qwen3.5-27B (blocked: requires vLLM 0.17+, we run 0.11)
-24. In progress: Config E quality bakeoff — 12-agent warpack 1-hour run on 14B × 4 (with model-3 fix); Config H (30B MoE) trial queued next
+24. ✅ E vs F Bakeoff — same code, same session, 12 agents: 14B serves 4.1× more requests, 2.1× faster TTFT, 1.8× faster E2E; 14B recommended for production (yaklog infra#132, #134, handoff#135)
+25. Next: Config H (30B MoE) trial — test whether MoE expert routing offers quality/speed middle ground between 14B and 32B
 
 ---
 
