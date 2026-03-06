@@ -76,6 +76,7 @@ Design Decisions (LOCKED):
 - Tool calling: auto-configured per model type (hermes for qwen, llama3_json for llama, mistral for mistral)
 - Thinking suppression: auto-applied to qwen3 models via registry (enable_thinking=false)
 - Worker failover: gateway retries next healthy worker on connection failure
+- Health check resilience: 3 consecutive failures required before excluding a worker (prevents transient timeout from permanent exclusion)
 - GPU placement: loader picks GPU with most free VRAM, computes --gpu-memory-utilization per model
 - Eviction: LRU among non-pinned models, pinned models never evicted
 - VRAM reservation: atomic reservation during loads to prevent concurrent oversubscription
@@ -206,8 +207,13 @@ Key Files:
 - agents/MODEL_BAKEOFF_RUNBOOK.md — operational runbook for isolated bakeoff trials
 
 Inter-Agent Coordination:
-- yaklog (http://192.168.122.76:3100) — shared context channel for Claude/Codex sessions
-- Channel: "handoff" — all cross-session updates, audit results, and operational guidance
+- yaklog (http://192.168.122.76:3100) — shared context bus for Claude/Codex sessions
+- Channels:
+  - infra — LLM stack, GPUs, thermals, vLLM configs, gateway, observability
+  - npc-behavior — agent audits, behavioral metrics, intent distribution, stuck loops, chat quality
+  - combat — combat system, fire pipeline, targeting, weapon slots, damage resolution, doctrine
+  - backend — game services, missing features, migrations, API gaps, entity/scan pipeline
+  - handoff — cross-session coordination, session summaries, priorities, decisions
 - NPC Agent Integration Guide lives on yaklog (msgs 10-13), not in repo
 
 Implementation Status:
@@ -229,10 +235,11 @@ Implementation Status:
 16. ✅ Capacity Analysis — measured 14B stack: TTFT p50 38.9s under load, 12.6s at 12 agents; practical max 15-18 agents (KV-bound at avg 9,716 tokens/request); 134:1 input:output ratio confirms pure prefill workload
 17. ✅ 32B-1per-GPU Profile — Qwen3-32B-AWQ × 2 workers (1/GPU, 0.90 util), 49K context via YaRN, ~6.7-6.9GB KV per worker, Config F
 18. ✅ 32B-GPU1-Only Profile — Qwen3-32B-AWQ × 1 worker on GPU 1, GPU 0 free, Config G
-19. ✅ 32B Performance Baseline — sustained load: 38.4s TTFT, 69.7s E2E, 99% KV, 44 preemptions at 10-12 agents; 2.7× slower than 14B at equivalent load (yaklog ops#103, #109, #112)
-20. ✅ Thinking Suppression Fix — models.32b-1per-gpu.yaml YAML format bug caused `<think>` token leak (8.3% parse failures); fixed to list format; 0% truncations after fix (yaklog handoff#110)
+19. ✅ 32B Performance Baseline — sustained load: 38.4s TTFT, 69.7s E2E, 99% KV, 44 preemptions at 10-12 agents; 2.7× slower than 14B at equivalent load (yaklog infra#125)
+20. ✅ Thinking Suppression Fix — models.32b-1per-gpu.yaml YAML format bug caused `<think>` token leak (8.3% parse failures); fixed to list format; 0% truncations after fix (yaklog handoff#126)
 21. ✅ Profile-Aware Observability — per-profile Prometheus scrape configs (14b-4worker, 32b, 32b-gpu1); start scripts auto-select; Grafana dashboard uses ratio-based health thresholds (works for any worker count)
-22. Next: 14B vs 32B quality bakeoff — 32B hour-long run complete, Config E comparison pending; assess game depth vs throughput trade-off
+22. ✅ Health Check Resilience — model-3 routing fix: require 3 consecutive health failures before worker exclusion (was instant); added recovery logging; prevents transient timeout under load from permanently dropping a worker
+23. Next: 14B vs 32B quality bakeoff — 32B hour-long run complete, Config E comparison pending (with model-3 fix); assess game depth vs throughput trade-off
 
 ---
 
