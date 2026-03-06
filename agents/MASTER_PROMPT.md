@@ -93,9 +93,9 @@ Available Models (9 vLLM-compatible):
 - Orion-zhen/Qwen2.5-7B-Instruct-Uncensored: ~15.2GB VRAM, qwen2, BF16
 - thirdeyeai/DeepSeek-R1-Distill-Qwen-14B-uncensored: ~29.6GB VRAM, qwen2, BF16
 
-Alias/pinning are profile-driven from `gateway/models.32b-1per-gpu.yaml` (32b, current), `gateway/models.14b-4worker.yaml` (14b-4worker), `gateway/models.yaml` (mixed/all-light), `gateway/models.one-model-per-gpu.yaml` (one-model), or `gateway/models.bakeoff.yaml` (bakeoff).
+Alias/pinning are profile-driven from `gateway/models.14b-4worker.yaml` (14b-4worker, current), `gateway/models.30b-moe.yaml` (30b-moe), `gateway/models.32b-1per-gpu.yaml` (32b), `gateway/models.yaml` (mixed/all-light), `gateway/models.one-model-per-gpu.yaml` (one-model), or `gateway/models.bakeoff.yaml` (bakeoff).
 
-GPU Allocation — Seven Configurations Available:
+GPU Allocation — Eight Configurations Available:
 
 Config A (mixed, docker-compose.yml + .env):
 - GPU 0: heavy-0 (14B, 0.50) + light-0 (4B, 0.40) = 90% utilization
@@ -149,6 +149,16 @@ Config G (32b-gpu1, docker-compose.32b-gpu1.yml + .env.32b-gpu1):
 - 49,152 token context via YaRN rope scaling (factor 1.2 × native 40,960)
 - Switch: ./start-32b-gpu1.sh
 
+Config H (30b-moe, docker-compose.30b-moe.yml + .env.30b-moe):
+- GPU 0: model-0 (Qwen3-30B-A3B MoE AWQ, 0.90 gpu-mem-util, ~16GB weights, ~26GB KV)
+- GPU 1: model-1 (Qwen3-30B-A3B MoE AWQ, 0.90 gpu-mem-util, ~16GB weights, ~26GB KV)
+- 2 workers total, both `light` and `heavy` aliases route to both
+- MoE: 30B total, 128 experts, 8 active per token (~8B effective), 48 layers
+- 49,152 token context (native 262K, no rope scaling needed)
+- max_num_seqs=64, max_num_batched_tokens=32768
+- Model: stelterlab/Qwen3-30B-A3B-Instruct-2507-AWQ (community AWQ, 16GB on disk)
+- Switch: ./start-30b-moe.sh / ./stop-30b-moe.sh
+
 Historical Production Metrics (2026-02-22 snapshot, 11h window, mixed-era):
 - 6,913 requests total: heavy 5,024 (72.7%), light 1,889 (27.3%)
 - Avg latency: heavy 8.0s, light 5.5s — fleet P50 6.0s (per Codex audit)
@@ -174,19 +184,21 @@ Measured Performance — Config F, 32B-1per-gpu (2026-03-06, Prometheus data):
 - Quality bakeoff in progress: 32B hour-long run complete, Config E (14B) comparison run pending
 
 Current Runtime Snapshot (2026-03-06):
-- Stack: DOWN — all containers stopped, both GPUs free
-- Pending: Config E (14B × 4) quality comparison run
-- To restart: ./start-14b-4worker.sh (Config E) or ./start-32b.sh (Config F) or ./start-32b-gpu1.sh (Config G)
+- Stack: Config E (14B × 4) RUNNING — 12-agent warpack quality bakeoff in progress
+- Config H (30B MoE) staged and ready for trial after E bakeoff completes
+- To switch: ./stop-14b-4worker.sh then ./start-30b-moe.sh (Config H) or ./start-32b.sh (Config F)
 
 Key Files:
 - start-14b-4worker.sh / stop-14b-4worker.sh — start/stop Config E (14B × 4) + observability
 - start-32b.sh / stop-32b.sh — start/stop Config F (32B × 2) + observability
 - start-32b-gpu1.sh — start Config G (32B GPU 1 only) + observability
+- start-30b-moe.sh / stop-30b-moe.sh — start/stop Config H (30B MoE × 2) + observability
 - docker-compose.14b-4worker.yml + .env.14b-4worker — Config E: 4 workers 2/GPU, 14B-AWQ, 49K context
 - docker-compose.32b-1per-gpu.yml + .env.32b-1per-gpu — Config F: 2 workers 1/GPU, 32B-AWQ, 49K context
 - docker-compose.32b-gpu1.yml + .env.32b-gpu1 — Config G: 1 worker GPU 1, 32B-AWQ, 49K context
+- docker-compose.30b-moe.yml + .env.30b-moe — Config H: 2 workers 1/GPU, 30B-MoE-AWQ, 48K context
 - docker-compose.observability.yml — Prometheus + Grafana, shares sswai_default network
-- prometheus/prometheus.{14b-4worker,32b,32b-gpu1}.yml — per-profile scrape configs (copied to prometheus.yml by start scripts)
+- prometheus/prometheus.{14b-4worker,32b,32b-gpu1,30b-moe}.yml — per-profile scrape configs (copied to prometheus.yml by start scripts)
 - grafana/dashboards/vllm.json — 12-panel vLLM dashboard (auto-provisioned, ratio-based health thresholds)
 - docker-compose.yml — 7 services: redis, heavy-0/1, light-0/1, gateway, loader
 - docker-compose.all-light.yml — 13 services: redis, light-0..9, gateway, loader
@@ -200,6 +212,7 @@ Key Files:
 - gateway/models.32b-1per-gpu.yaml — Qwen3-32B-AWQ pinned, aliases [light, heavy], 49K context
 - gateway/models.14b-4worker.yaml — Qwen3-14B-AWQ pinned, aliases [light, heavy], 49K context
 - gateway/models.one-model-per-gpu.yaml — one-model alias/pinning profile
+- gateway/models.30b-moe.yaml — Qwen3-30B-A3B MoE AWQ pinned, aliases [light, heavy], 48K context
 - gateway/models.bakeoff.yaml — bakeoff alias/pinning profile for candidate trials
 - loader/loader.py — Docker SDK container lifecycle, GPU placement, LRU eviction
 - scripts/load_test.py — concurrent load testing tool
@@ -239,7 +252,8 @@ Implementation Status:
 20. ✅ Thinking Suppression Fix — models.32b-1per-gpu.yaml YAML format bug caused `<think>` token leak (8.3% parse failures); fixed to list format; 0% truncations after fix (yaklog handoff#126)
 21. ✅ Profile-Aware Observability — per-profile Prometheus scrape configs (14b-4worker, 32b, 32b-gpu1); start scripts auto-select; Grafana dashboard uses ratio-based health thresholds (works for any worker count)
 22. ✅ Health Check Resilience — model-3 routing fix: require 3 consecutive health failures before worker exclusion (was instant); added recovery logging; prevents transient timeout under load from permanently dropping a worker
-23. Next: 14B vs 32B quality bakeoff — 32B hour-long run complete, Config E comparison pending (with model-3 fix); assess game depth vs throughput trade-off
+23. ✅ 30B MoE Profile — Qwen3-30B-A3B-Instruct-2507-AWQ (MoE, 128 experts, 8 active/token) downloaded, Config H fully staged; also evaluated Qwen3.5-27B (blocked: requires vLLM 0.17+, we run 0.11)
+24. In progress: Config E quality bakeoff — 12-agent warpack 1-hour run on 14B × 4 (with model-3 fix); Config H (30B MoE) trial queued next
 
 ---
 
