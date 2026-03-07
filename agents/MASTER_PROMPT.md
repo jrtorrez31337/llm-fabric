@@ -192,7 +192,7 @@ Measured Performance — Config F, 32B-1per-gpu (2026-03-06, Prometheus data, 42
 - Prefix cache hit rate: 15.3%
 - 0 aborted, 0 length-exceeded — thinking suppression fix holding
 
-Measured Performance — Config H, 30B-MoE (2026-03-07, Prometheus data, 2,151 requests):
+Measured Performance — Config H, 30B-MoE Run #1 (2026-03-07, Prometheus data, 2,151 requests):
 - TTFT p50: 10.9s, p95: 51.6s, avg: 15.3s
 - E2E p50: 32.2s, p95: 95.8s, avg: 33.6s
 - Queue avg: 2.1s, Prefill avg: 8.4s, Decode avg: 21.5s, TPOT p50: 82ms
@@ -200,6 +200,17 @@ Measured Performance — Config H, 30B-MoE (2026-03-07, Prometheus data, 2,151 r
 - KV peak: 78.2% (GPU 0), 81.4% (GPU 1) | Preemptions: 1 total
 - Length-exceeded: 150 requests (6.5%) — MoE generates ~2× more output tokens than 14B
 - Prefix cache hit rate: 18.7%
+
+Measured Performance — Config H, 30B-MoE Run #2 (2026-03-07, Prometheus data, 2,653 requests):
+- TTFT p50: 7.2s, p95: 29.7s, avg: 9.0s
+- E2E p50: 27.0s, p95: 55.1s, avg: 27.4s
+- Queue avg: 2.2s, Prefill avg: 4.9s, Decode avg: 18.5s, TPOT p50: 64ms
+- Avg prompt: 10,006 | Avg gen: 129 | Ratio: 78:1
+- KV peak: 98.2% (GPU 0), 86.1% (GPU 1) | Preemptions: 3 (all GPU 0)
+- Length-exceeded: 168 requests (6.3%) — stable vs run #1
+- Prefix cache hit rate: 17.6%
+- Worker balance: model-0 1,306 / model-1 1,347 (3% spread)
+- Improvement vs run #1: TTFT -34%, E2E -18%, TPOT -22%, throughput +23%
 
 Three-Way Bakeoff Verdict (E vs F vs H, same code, 12 agents, yaklog infra#137, handoff#138):
 | Metric           | Config E (14B×4) | Config F (32B×2) | Config H (MoE×2) |
@@ -217,7 +228,7 @@ Three-Way Bakeoff Verdict (E vs F vs H, same code, 12 agents, yaklog infra#137, 
 
 Current Runtime Snapshot (2026-03-07):
 - Stack: Config H RUNNING — systemd-managed, starts on boot (`sswai.service`)
-- Production config: Config H (30B MoE × 2) — bakeoff winner
+- Production config: Config H (30B MoE × 2) — bakeoff winner, 2 production runs completed
 - CLI: `./sswai start` / `./sswai stop` / `./sswai health` / `./sswai gpu` / `./sswai metrics` / `./sswai test`
 - Systemd: `sudo systemctl start|stop|status sswai` — enabled at boot
 - Legacy scripts still available: ./start-14b-4worker.sh (E), ./start-32b.sh (F), ./start-30b-moe.sh (H)
