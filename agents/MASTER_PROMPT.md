@@ -212,6 +212,17 @@ Measured Performance — Config H, 30B-MoE Run #2 (2026-03-07, Prometheus data, 
 - Worker balance: model-0 1,306 / model-1 1,347 (3% spread)
 - Improvement vs run #1: TTFT -34%, E2E -18%, TPOT -22%, throughput +23%
 
+Measured Performance — Config H, 30B-MoE Run #3 (2026-03-07, Prometheus data, 6,976 requests):
+- TTFT p50: 7.4s, p95: 30.4s, avg: 8.7s
+- E2E p50: 25.4s, p95: 56.1s, avg: 25.9s
+- Queue avg: 1.8s, Prefill avg: 5.0s, Decode avg: 17.1s, TPOT p50: 62ms
+- Avg prompt: 10,090 | Avg gen: 129 | Ratio: 78:1
+- KV peak: 96.8% (GPU 0), 83.8% (GPU 1) | Preemptions: 0
+- Length-exceeded: 364 requests (5.2%) — improving trend (6.5% → 6.3% → 5.2%)
+- Prefix cache hit rate: 14.0%
+- Worker balance: model-0 3,312 / model-1 3,664 (5% spread)
+- Longest sustained run: 0 preemptions, 0 aborts — production-validated
+
 Three-Way Bakeoff Verdict (E vs F vs H, same code, 12 agents, yaklog infra#137, handoff#138):
 | Metric           | Config E (14B×4) | Config F (32B×2) | Config H (MoE×2) |
 |------------------|------------------|------------------|-------------------|
