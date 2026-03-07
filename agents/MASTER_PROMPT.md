@@ -154,7 +154,7 @@ Config H (30b-moe, docker-compose.30b-moe.yml + .env.30b-moe):
 - GPU 1: model-1 (Qwen3-30B-A3B MoE AWQ, 0.90 gpu-mem-util, ~16GB weights, ~26GB KV)
 - 2 workers total, both `light` and `heavy` aliases route to both
 - MoE: 30B total, 128 experts, 8 active per token (~8B effective), 48 layers
-- 49,152 token context (native 262K, no rope scaling needed)
+- 65,536 token context (native 262K, no rope scaling needed)
 - max_num_seqs=64, max_num_batched_tokens=32768
 - Model: stelterlab/Qwen3-30B-A3B-Instruct-2507-AWQ (community AWQ, 16GB on disk)
 - Switch: ./start-30b-moe.sh / ./stop-30b-moe.sh
@@ -252,7 +252,7 @@ Key Files:
 - docker-compose.14b-4worker.yml + .env.14b-4worker — Config E: 4 workers 2/GPU, 14B-AWQ, 49K context
 - docker-compose.32b-1per-gpu.yml + .env.32b-1per-gpu — Config F: 2 workers 1/GPU, 32B-AWQ, 49K context
 - docker-compose.32b-gpu1.yml + .env.32b-gpu1 — Config G: 1 worker GPU 1, 32B-AWQ, 49K context
-- docker-compose.30b-moe.yml + .env.30b-moe — Config H: 2 workers 1/GPU, 30B-MoE-AWQ, 48K context
+- docker-compose.30b-moe.yml + .env.30b-moe — Config H: 2 workers 1/GPU, 30B-MoE-AWQ, 64K context
 - docker-compose.observability.yml — Prometheus + Grafana, shares sswai_default network
 - prometheus/prometheus.{14b-4worker,32b,32b-gpu1,30b-moe}.yml — per-profile scrape configs (copied to prometheus.yml by start scripts)
 - grafana/dashboards/vllm.json — 12-panel vLLM dashboard (auto-provisioned, ratio-based health thresholds)
@@ -314,7 +314,8 @@ Implementation Status:
 24. ✅ E vs F Bakeoff — same code, same session, 12 agents: 14B serves 4.1× more requests, 2.1× faster TTFT, 1.8× faster E2E; 14B recommended for production (yaklog infra#132, #134, handoff#135)
 25. ✅ Config H (30B MoE) Trial — 2,151 req/hr, 10.9s TTFT p50, 33.6s E2E avg, 1 preemption; dominates E and F on all infra metrics; 6.5% length-exceeded needs investigation (yaklog infra#137, handoff#138)
 26. ✅ Production CLI — unified `./sswai` script (start/stop/restart/status/health/logs/gpu/metrics/test/config) wired to Config H
-27. Next: Length-exceeded mitigation for Config H — investigate 6.5% rate (150/2,151 requests); options: raise max_model_len, tune thinking suppression, agent behavioral audit under MoE
+27. ✅ Length-exceeded mitigation — raised max_model_len from 49,152 to 65,536 (MoE native 262K, no rope scaling); should eliminate most of the 5.2% length-exceeded tail
+28. Next: Agent behavioral audit under Config H — compare quality with previous audits (#75 Config E, #136 E vs F)
 
 ---
 

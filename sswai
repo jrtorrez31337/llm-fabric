@@ -27,7 +27,7 @@ PROJECT="sswai"
 GATEWAY_PORT=8000
 PROM_PORT=9090
 GRAFANA_PORT=3000
-PROFILE_NAME="Config H — Qwen3-30B-A3B MoE AWQ × 2 workers (1/GPU), 48K context"
+PROFILE_NAME="Config H — Qwen3-30B-A3B MoE AWQ × 2 workers (1/GPU), 64K context"
 
 # --- Helpers ---
 compose() {

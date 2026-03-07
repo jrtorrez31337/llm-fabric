@@ -4,4 +4,4 @@ models:
     kv_reserve_mb: 26000
     aliases: [light, heavy]
     pinned: true
-    max_model_len: 49152
+    max_model_len: 65536
