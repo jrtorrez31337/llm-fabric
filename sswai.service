@@ -1,0 +1,18 @@
+[Unit]
+Description=SSW AI Inference Platform (Config H — 30B MoE)
+After=docker.service nvidia-persistenced.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/jon/sswai
+ExecStart=/home/jon/sswai/sswai start
+ExecStop=/home/jon/sswai/sswai stop
+User=jon
+Group=jon
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

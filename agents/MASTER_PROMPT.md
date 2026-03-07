@@ -216,9 +216,10 @@ Three-Way Bakeoff Verdict (E vs F vs H, same code, 12 agents, yaklog infra#137, 
 - Recommendation: Config H (30B MoE) for production, with length-exceeded mitigation as next priority
 
 Current Runtime Snapshot (2026-03-07):
-- Stack: DOWN — all containers stopped, both GPUs free
+- Stack: Config H RUNNING — systemd-managed, starts on boot (`sswai.service`)
 - Production config: Config H (30B MoE × 2) — bakeoff winner
 - CLI: `./sswai start` / `./sswai stop` / `./sswai health` / `./sswai gpu` / `./sswai metrics` / `./sswai test`
+- Systemd: `sudo systemctl start|stop|status sswai` — enabled at boot
 - Legacy scripts still available: ./start-14b-4worker.sh (E), ./start-32b.sh (F), ./start-30b-moe.sh (H)
 
 Key Files:
@@ -252,6 +253,7 @@ Key Files:
 - agents/YAKLOG_GUIDE.md — yaklog inter-agent messaging reference (local-only, gitignored)
 - agents/MODEL_BAKEOFF_RUNBOOK.md — operational runbook for isolated bakeoff trials
 - sswai — production CLI (start/stop/restart/status/health/logs/gpu/metrics/test/config)
+- sswai.service — systemd unit for boot-start (installed to /etc/systemd/system/)
 
 Inter-Agent Coordination:
 - yaklog (http://192.168.122.76:3100) — shared context bus for Claude/Codex sessions
