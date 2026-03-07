@@ -13,7 +13,7 @@ import yaml
 log = logging.getLogger(__name__)
 
 # Model types that vLLM can serve (exclude TTS, multimodal, custom arches)
-VLLM_MODEL_TYPES = {"qwen2", "qwen3", "llama", "mistral", "gemma", "gemma2", "phi3"}
+VLLM_MODEL_TYPES = {"qwen2", "qwen3", "qwen3_moe", "llama", "mistral", "gemma", "gemma2", "phi3"}
 
 # Directories to skip when scanning (HF cache dirs, non-model dirs)
 SKIP_PREFIXES = ("models--", "huggingface", "whisper", "crv_")
@@ -38,7 +38,7 @@ class ModelInfo:
 
 
 def _infer_tool_call_parser(model_type: str) -> str:
-    if model_type in ("qwen2", "qwen3"):
+    if model_type in ("qwen2", "qwen3", "qwen3_moe"):
         return "hermes"
     if model_type == "llama":
         return "llama3_json"
@@ -48,7 +48,7 @@ def _infer_tool_call_parser(model_type: str) -> str:
 
 
 def _infer_thinking_suppression(model_type: str) -> bool:
-    return model_type == "qwen3"
+    return model_type in ("qwen3", "qwen3_moe")
 
 
 def _estimate_vram(model_dir: str, quant: str) -> int:
@@ -68,11 +68,13 @@ def _infer_quantization_flag(quant: str) -> str | None:
         return "awq_marlin"
     if quant == "gptq":
         return "gptq_marlin"
+    if quant == "compressed-tensors":
+        return "compressed-tensors"
     return None
 
 
 def _infer_dtype(quant: str) -> str:
-    if quant in ("awq", "gptq", "awq_marlin"):
+    if quant in ("awq", "gptq", "awq_marlin", "compressed-tensors"):
         return "half"
     return "auto"
 
