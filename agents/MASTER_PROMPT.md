@@ -332,7 +332,8 @@ Implementation Status:
 29. ✅ Fast Tier Isolation — removed masheen from yak light pool (was degrading 33% of requests); added masheen to Prometheus; comparative analysis confirms 4B viable for gates/classification/extraction (infra#163)
 30. ✅ Platform Reframe — general-purpose private-network AI backbone, not SSW-specific; master control agent (traptop10k-claude) designated (infra#166)
 31. Pending: masheen model upgrade to Qwen3-4B-Instruct-2507-AWQ (handoff#165, needs shell access on masheen)
-32. Next: Repo migration — archive ssw-llm-server, create general-purpose repo
+32. ✅ Repo Migration — archived jrtorrez31337/ssw-llm-server, created jrtorrez31337/llm-fabric with full history
+33. Next: Update docs/USING_OUTSIDE_SSW.md → rename and rebrand for general-purpose consumers
 
 ---
 
@@ -544,6 +545,6 @@ Requires download directly on masheen — no SSH from yak.
 
 ### Shared Repo
 
-github.com/jrtorrez31337/ssw-llm-server
+github.com/jrtorrez31337/llm-fabric
 Masheen-specific files: docker-compose.masheen.yml, .env.masheen,
   gateway/models.masheen.yaml, ./masheen (management script)
