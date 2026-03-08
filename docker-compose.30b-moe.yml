@@ -85,7 +85,7 @@ services:
       - ./gateway/models.30b-moe.yaml:/app/models.yaml:ro
     environment:
       - GATEWAY_HEAVY_WORKERS=
-      - GATEWAY_LIGHT_WORKERS=http://model-0:8000,http://model-1:8000
+      - GATEWAY_LIGHT_WORKERS=http://model-0:8000,http://model-1:8000,http://10.200.0.2:8001
       - GATEWAY_REDIS_URL=redis://redis:6379/0
       - GATEWAY_MODELS_DIR=/models
       - GATEWAY_MODELS_YAML_PATH=/app/models.yaml
