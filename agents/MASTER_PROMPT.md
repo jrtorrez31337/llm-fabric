@@ -246,9 +246,9 @@ Three-Way Bakeoff Verdict (E vs F vs H, same code, 12 agents, yaklog infra#137, 
 
 Current Runtime Snapshot (2026-03-08):
 - Cluster: 2-node (yak + masheen) via WireGuard overlay (10.200.0.0/24)
-- Yak: Config H RUNNING — 30B MoE × 2 workers (A40s) + masheen as 3rd light worker, systemd boot-start
-- Masheen: Qwen3-4B-AWQ × 1 worker (RTX 2080), systemd boot-start (sswai-masheen.service)
-- Yak gateway routes to 3 workers: model-0, model-1 (local 30B MoE), 10.200.0.2:8001 (masheen 4B)
+- Yak: Config H RUNNING — 30B MoE × 2 workers (A40s), systemd boot-start
+- Masheen: Qwen3-4B-Instruct-2507-AWQ × 1 worker (RTX 2080), isolated fast tier, systemd boot-start
+- Yak gateway routes to 2 local workers: model-0, model-1 (30B MoE). Masheen isolated (not in yak pool).
 - CLI: `./sswai start|stop|health|gpu|metrics|test` (yak), `./masheen start|stop|health|gpu|test` (masheen)
 - Systemd: `sudo systemctl start|stop|status sswai` (yak), `sswai-masheen.service` (masheen)
 - Legacy scripts still available: ./start-14b-4worker.sh (E), ./start-32b.sh (F), ./start-30b-moe.sh (H)
@@ -287,8 +287,8 @@ Key Files:
 - sswai.service — systemd unit for yak boot-start (installed to /etc/systemd/system/)
 - masheen — production CLI for masheen node (start/stop/restart/status/health/logs/gpu/test/config)
 - sswai-masheen.service — systemd unit for masheen boot-start
-- docker-compose.masheen.yml + .env.masheen — masheen stack: Qwen3-4B-AWQ, 1 worker, RTX 2080
-- gateway/models.masheen.yaml — masheen alias profile: light, heavy, fast → Qwen3-4B-AWQ
+- docker-compose.masheen.yml + .env.masheen — masheen stack: Qwen3-4B-Instruct-2507-AWQ, 1 worker, RTX 2080
+- gateway/models.masheen.yaml — masheen alias profile: light, heavy, fast → Qwen3-4B-Instruct-2507-AWQ
 
 Inter-Agent Coordination:
 - yaklog (http://192.168.122.76:3100) — shared context bus for Claude/Codex sessions
@@ -331,7 +331,7 @@ Implementation Status:
 28. ✅ Distributed Cluster — masheen node (RTX 2080, Qwen3-4B-AWQ) joined via WireGuard; both nodes systemd boot-start
 29. ✅ Fast Tier Isolation — removed masheen from yak light pool (was degrading 33% of requests); added masheen to Prometheus; comparative analysis confirms 4B viable for gates/classification/extraction (infra#163)
 30. ✅ Platform Reframe — general-purpose private-network AI backbone, not SSW-specific; master control agent (traptop10k-claude) designated (infra#166)
-31. Pending: masheen model upgrade to Qwen3-4B-Instruct-2507-AWQ (handoff#165, needs shell access on masheen)
+31. ✅ Masheen model upgrade — Qwen3-4B-Instruct-2507-AWQ running (Eslzzyl community AWQ, XFORMERS backend for sm_75)
 32. ✅ Repo Migration — archived jrtorrez31337/ssw-llm-server, created jrtorrez31337/llm-fabric with full history
 33. Next: Update docs/USING_OUTSIDE_SSW.md → rename and rebrand for general-purpose consumers
 
@@ -499,7 +499,7 @@ The inference platform has expanded to a two-node cluster.
 ### Cluster Topology
 
 - yak: 2x NVIDIA A40 (45+48 GB VRAM), WireGuard 10.200.0.1 — Primary gateway + 30B MoE workers
-- masheen: RTX 2080 (8 GB VRAM), WireGuard 10.200.0.2 — Secondary node, Qwen3-4B-AWQ
+- masheen: RTX 2080 (8 GB VRAM), WireGuard 10.200.0.2 — Secondary node, Qwen3-4B-Instruct-2507-AWQ
 
 ### WireGuard Overlay
 
@@ -510,11 +510,13 @@ The inference platform has expanded to a two-node cluster.
 
 ### Masheen Model
 
-Qwen/Qwen3-4B-AWQ — sized for RTX 2080 8GB VRAM:
-- Weights: ~2.8 GB with gpu-memory-utilization=0.85
+Qwen/Qwen3-4B-Instruct-2507-AWQ (Eslzzyl community AWQ) — sized for RTX 2080 8GB VRAM:
+- Weights: ~2.5 GB (AWQ INT4, group_size=128)
+- gpu-memory-utilization: 0.80
 - Max context: 16384 tokens
 - Aliases: light, heavy, fast
-- Stored at: /data/models/Qwen/Qwen3-4B-AWQ/
+- Stored at: /data/models/Qwen/Qwen3-4B-Instruct-2507-AWQ/
+- vLLM 0.17 on sm_75 (Turing): requires VLLM_ATTENTION_BACKEND=XFORMERS (FA2 needs sm_80+)
 
 ### Masheen Gateway
 
@@ -540,8 +542,9 @@ extraction, tool calls) where latency matters more than reasoning depth.
 Analysis (infra#163): 4B is equivalent to 30B on gates/classification/extraction/tool calls,
 weaker on multi-step reasoning. Supports a separate alias for appropriate task routing.
 
-Model upgrade pending (handoff#165): swap to Qwen3-4B-Instruct-2507-AWQ (ranked #1 at 4B size).
-Requires download directly on masheen — no SSH from yak.
+Model upgrade complete (handoff#165): swapped to Qwen3-4B-Instruct-2507-AWQ.
+Root cause of prior OOM: Eslzzyl repo included BF16 shards (7.6GB) alongside AWQ model.safetensors (2.5GB).
+Index file pointed vLLM to BF16 shards. Fix: removed BF16 shards + index, kept AWQ model.safetensors only.
 
 ### Shared Repo
 
