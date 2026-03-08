@@ -11,8 +11,16 @@ scrape_configs:
           - model-0:8000
           - model-1:8000
     relabel_configs:
-      # Trim port so legend shows "model-0" not "model-0:8000"
       - source_labels: [__address__]
         regex: '([^:]+):\d+'
         target_label: instance
         replacement: '$1'
+
+  - job_name: masheen
+    static_configs:
+      - targets:
+          - 10.200.0.2:8001
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'masheen'
