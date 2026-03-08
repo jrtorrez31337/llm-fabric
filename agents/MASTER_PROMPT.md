@@ -452,3 +452,98 @@ Chief Infrastructure Intelligence for SSW.
 You create order from expansion.
 
 Proceed.
+
+---
+
+## DISTRIBUTED CLUSTER — Masheen Node (added 2026-03-08)
+
+The inference platform has expanded to a two-node cluster.
+
+### Cluster Topology
+
+| Node | Hardware | WireGuard IP | Role |
+|---|---|---|---|
+| yak | 2× NVIDIA A40 (45+48 GB VRAM) | 10.200.0.1 | Primary gateway + 30B MoE workers |
+| masheen | NVIDIA RTX 2080 (8 GB VRAM) | 10.200.0.2 | Secondary node — Qwen3-4B-AWQ |
+
+### WireGuard Overlay
+
+- Subnet: 
+- yak listens on :51820, masheen peers to it
+- Both nodes:  (auto-starts at boot)
+
+### Masheen's Model
+
+**Qwen/Qwen3-4B-AWQ** — chosen for RTX 2080 8GB:
+- Weights: ~2.8 GB, 
+- Max context: 16,384 tokens
+- Aliases: , , 
+- Model path: 
+
+### Masheen Gateway
+
+- Masheen runs a full sswai stack (redis + vLLM + gateway + loader)
+- Own OpenAI-compatible endpoint:  (LAN) or  (WireGuard)
+- Managed by: 
+- Systemd:  (starts after Docker + WireGuard)
+
+### Integration with Yak Gateway
+
+Yak's gateway (docker-compose.30b-moe.yml) lists masheen's vLLM worker:
+
+
+The worker at  is masheen's raw vLLM port (not its gateway).
+Docker containers on yak route there via the host WireGuard interface automatically.
+
+### Repo
+
+Both nodes share the same repo: 
+Masheen-specific files: , , ,  script
+
+---
+
+## DISTRIBUTED CLUSTER — Masheen Node (added 2026-03-08)
+
+The inference platform has expanded to a two-node cluster.
+
+### Cluster Topology
+
+- yak: 2x NVIDIA A40 (45+48 GB VRAM), WireGuard 10.200.0.1 — Primary gateway + 30B MoE workers
+- masheen: RTX 2080 (8 GB VRAM), WireGuard 10.200.0.2 — Secondary node, Qwen3-4B-AWQ
+
+### WireGuard Overlay
+
+- Subnet: 10.200.0.0/24
+- yak listens on :51820, masheen peers to it (PersistentKeepalive=25)
+- Both nodes auto-start via: systemctl enable wg-quick@wg0
+- Test tunnel: ping 10.200.0.2 (from yak)
+
+### Masheen Model
+
+Qwen/Qwen3-4B-AWQ — sized for RTX 2080 8GB VRAM:
+- Weights: ~2.8 GB with gpu-memory-utilization=0.85
+- Max context: 16384 tokens
+- Aliases: light, heavy, fast
+- Stored at: /data/models/Qwen/Qwen3-4B-AWQ/
+
+### Masheen Gateway
+
+Masheen runs its own full sswai stack (redis + vLLM + gateway + loader).
+- LAN endpoint:       http://10.71.1.215:8000
+- WireGuard endpoint: http://10.200.0.2:8000
+- Managed by:         cd ~/sswai && ./masheen start|stop|health|gpu|test
+- Systemd service:    sswai-masheen.service (starts after Docker + wg-quick@wg0)
+
+### Integration with Yak Gateway
+
+Yak gateway (docker-compose.30b-moe.yml) adds masheen as a third light worker:
+  GATEWAY_LIGHT_WORKERS=http://model-0:8000,http://model-1:8000,http://10.200.0.2:8001
+
+Port 8001 is masheen raw vLLM port (bound 0.0.0.0 so Docker containers on yak
+can reach it through the host WireGuard interface).
+
+### Shared Repo
+
+github.com/jrtorrez31337/ssw-llm-server
+Masheen-specific files: docker-compose.masheen.yml, .env.masheen,
+  gateway/models.masheen.yaml, ./masheen (management script)
