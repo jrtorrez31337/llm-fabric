@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# masheen — SSW AI inference CLI for the masheen node (RTX 2080)
+#
+# Usage:
+#   ./masheen start     Start stack (Qwen3-4B-AWQ)
+#   ./masheen stop      Stop all services
+#   ./masheen restart   Stop then start
+#   ./masheen status    Container status
+#   ./masheen health    Health check
+#   ./masheen logs [S]  Tail logs
+#   ./masheen gpu       GPU utilization
+#   ./masheen test [N]  Smoke test (default 3)
+#   ./masheen config    Show active config
+#
+# Profile: Masheen node — Qwen3-4B-AWQ, 1 worker, RTX 2080 8GB
+
+set -euo pipefail
+cd "$(dirname "$0")"
+
+COMPOSE_FILE="docker-compose.masheen.yml"
+ENV_FILE=".env.masheen"
+PROJECT="sswai"
+GATEWAY_PORT=8000
+PROFILE_NAME="Masheen — Qwen3-4B-AWQ × 1 worker, RTX 2080 8GB"
+
+compose() {
+  docker compose -p "$PROJECT" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+}
+
+cmd_start() {
+  echo "==> Starting masheen stack ($PROFILE_NAME)..."
+  compose up -d
+  echo ""
+  echo "Endpoints:"
+  echo "  Gateway (LAN)        http://10.71.1.215:${GATEWAY_PORT}"
+  echo "  Gateway (WireGuard)  http://10.200.0.2:${GATEWAY_PORT}"
+  echo "  Worker (WireGuard)   http://10.200.0.2:8001  (for yak gateway)"
+}
+
+cmd_stop() {
+  echo "==> Stopping masheen services..."
+  compose down
+  echo "All services stopped."
+}
+
+cmd_restart() { cmd_stop; echo; cmd_start; }
+
+cmd_status() {
+  echo "==> Container status:"
+  compose ps --format 'table {{.Name}}\t{{.Status}}\t{{.Ports}}'
+}
+
+cmd_health() {
+  echo "==> Health checks:"
+  printf "  %-14s" "Gateway"
+  if curl -sf "http://localhost:${GATEWAY_PORT}/health" -o /dev/null --max-time 5; then echo "OK"
+  else echo "FAIL"; fi
+
+  printf "  %-14s" "Models"
+  if models=$(curl -sf "http://localhost:${GATEWAY_PORT}/v1/models" --max-time 5); then
+    count=$(echo "$models" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('data',[])))" 2>/dev/null || echo "?")
+    echo "OK  ($count models loaded)"
+  else echo "FAIL"; fi
+}
+
+cmd_logs() {
+  if [[ $# -gt 0 ]]; then compose logs -f --tail=100 "$@"
+  else compose logs -f --tail=50; fi
+}
+
+cmd_gpu() {
+  echo "==> GPU utilization:"
+  nvidia-smi --query-gpu=index,name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu     --format=csv,noheader,nounits |     awk -F', ' '{printf "  GPU %s  %-16s  Util: %3s%%  MemUtil: %3s%%  VRAM: %6s / %6s MiB  Temp: %s°C\n", $1, $2, $3, $4, $5, $6, $7}'
+}
+
+cmd_test() {
+  local n=${1:-3}
+  echo "==> Smoke test: ${n} requests..."
+  local pass=0 fail=0
+  for i in $(seq 1 "$n"); do
+    printf "  [%d/%d] " "$i" "$n"
+    if resp=$(curl -sf "http://localhost:${GATEWAY_PORT}/v1/chat/completions"       -H "Content-Type: application/json" --max-time 60       -d '{"model":"light","messages":[{"role":"user","content":"Say OK."}],"max_tokens":5}' 2>/dev/null); then
+      content=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['choices'][0]['message']['content'][:50])" 2>/dev/null || echo "?")
+      echo "OK  -> $content"; ((pass++))
+    else echo "FAIL"; ((fail++)); fi
+  done
+  echo ""; echo "Results: ${pass} passed, ${fail} failed"
+}
+
+cmd_config() {
+  echo "==> Active configuration:"
+  echo "  Profile:  $PROFILE_NAME"
+  echo "  Compose:  $COMPOSE_FILE"
+  echo "  Env:      $ENV_FILE"
+  echo ""
+  echo "  Environment:"
+  while IFS= read -r line; do
+    [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+    echo "    $line"
+  done < "$ENV_FILE"
+}
+
+case "${1:-help}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_restart ;;
+  status)  cmd_status ;;
+  health)  cmd_health ;;
+  logs)    shift; cmd_logs "$@" ;;
+  gpu)     cmd_gpu ;;
+  test)    shift; cmd_test "$@" ;;
+  config)  cmd_config ;;
+  help|--help|-h)
+    echo "masheen — SSW AI CLI for masheen node"
+    echo "Usage: ./masheen <command>"
+    echo "Commands: start stop restart status health logs gpu test config"
+    echo "Active profile: $PROFILE_NAME"
+    ;;
+  *) echo "Unknown: $1"; exit 1 ;;
+esac

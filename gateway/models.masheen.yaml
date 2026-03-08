@@ -1,0 +1,7 @@
+models:
+  - model_id: Qwen/Qwen3-4B-AWQ
+    vram_mb: 2800
+    kv_reserve_mb: 4000
+    aliases: [light, heavy, fast]
+    pinned: true
+    max_model_len: 16384
