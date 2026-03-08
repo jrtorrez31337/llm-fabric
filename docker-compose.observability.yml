@@ -1,19 +1,17 @@
 # SSW AI — Observability Stack (Prometheus + Grafana)
 #
 # Run with the same project name as the vLLM stack so both share sswai_default
-# network and Prometheus can reach model-0..3 by service name.
+# network and Prometheus can reach workers by service name.
 #
-# Usage (standalone):
+# Usage:
 #   docker compose -p sswai -f docker-compose.observability.yml up -d
-#
-# Or use start-14b-4worker.sh which starts both stacks together.
 
 services:
   prometheus:
     image: prom/prometheus:latest
     container_name: ssw-prometheus
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/prometheus.3tier.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml

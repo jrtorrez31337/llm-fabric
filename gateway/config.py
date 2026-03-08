@@ -10,8 +10,9 @@ from pydantic_settings import BaseSettings
 class WorkerPool:
     """Thread-safe round-robin pool of worker URLs."""
 
-    def __init__(self, name: str, urls: list[str] | None = None):
+    def __init__(self, name: str, urls: list[str] | None = None, served_name: str | None = None):
         self.name = name
+        self.served_name = served_name or name  # model name workers respond to
         self._urls: list[str] = list(urls) if urls else []
         self._index = 0
         self.healthy: set[str] = set(self._urls)
@@ -133,9 +134,16 @@ class PoolManager:
 
 
 class Settings(BaseSettings):
-    # Legacy worker URLs (backward compat)
+    # Static worker URLs
     heavy_workers: str = "http://heavy-0:8000,http://heavy-1:8000"
     light_workers: str = "http://light-0:8000,http://light-1:8000"
+    fast_workers: str = ""
+    fast_big_workers: str = ""
+    fast_small_workers: str = ""
+
+    # Pool→served-model-name overrides (comma-separated pool:name pairs)
+    # e.g. "fast:light" means workers in "fast" pool respond to model="light"
+    pool_served_names: str = ""
 
     # Registry
     models_dir: str = "/models"
@@ -144,6 +152,9 @@ class Settings(BaseSettings):
     # Dynamic port range (for loader)
     dynamic_port_start: int = 9000
     dynamic_port_end: int = 9099
+
+    # API key validation (comma-separated valid keys; empty = accept any key)
+    api_keys: str = ""
 
     # Redis
     redis_url: str = "redis://redis:6379/0"

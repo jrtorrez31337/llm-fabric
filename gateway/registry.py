@@ -13,7 +13,7 @@ import yaml
 log = logging.getLogger(__name__)
 
 # Model types that vLLM can serve (exclude TTS, multimodal, custom arches)
-VLLM_MODEL_TYPES = {"qwen2", "qwen3", "qwen3_moe", "llama", "mistral", "gemma", "gemma2", "phi3"}
+VLLM_MODEL_TYPES = {"qwen2", "qwen3", "qwen3_moe", "qwen3_5", "llama", "mistral", "gemma", "gemma2", "phi3"}
 
 # Directories to skip when scanning (HF cache dirs, non-model dirs)
 SKIP_PREFIXES = ("models--", "huggingface", "whisper", "crv_")
@@ -38,6 +38,8 @@ class ModelInfo:
 
 
 def _infer_tool_call_parser(model_type: str) -> str:
+    if model_type == "qwen3_5":
+        return "qwen3_coder"
     if model_type in ("qwen2", "qwen3", "qwen3_moe"):
         return "hermes"
     if model_type == "llama":
@@ -48,7 +50,7 @@ def _infer_tool_call_parser(model_type: str) -> str:
 
 
 def _infer_thinking_suppression(model_type: str) -> bool:
-    return model_type in ("qwen3", "qwen3_moe")
+    return model_type in ("qwen3", "qwen3_moe", "qwen3_5")
 
 
 def _estimate_vram(model_dir: str, quant: str) -> int:

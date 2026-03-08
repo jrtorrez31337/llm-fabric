@@ -1,9 +1,9 @@
 {
   "title": "vLLM — SSW AI Inference",
   "uid": "sswai-vllm",
-  "description": "Real-time metrics for vLLM workers",
+  "description": "Real-time metrics for vLLM workers across all tiers",
   "schemaVersion": 38,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "tags": ["vllm", "sswai"],
   "time": { "from": "now-1h", "to": "now" },
@@ -23,6 +23,34 @@
         "query": "prometheus",
         "refresh": 1,
         "type": "datasource"
+      },
+      {
+        "current": {},
+        "definition": "label_values(up, tier)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Tier",
+        "multi": true,
+        "name": "tier",
+        "options": [],
+        "query": "label_values(up, tier)",
+        "refresh": 2,
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" }
+      },
+      {
+        "current": {},
+        "definition": "label_values(up{tier=~\"$tier\"}, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Instance",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(up{tier=~\"$tier\"}, instance)",
+        "refresh": 2,
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" }
       }
     ]
   },
@@ -31,12 +59,12 @@
       "id": 1,
       "type": "stat",
       "title": "Active Requests",
-      "description": "Total requests currently being processed across all workers",
+      "description": "Total requests currently being processed across selected workers",
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum(vllm:num_requests_running)",
+          "expr": "sum(vllm:num_requests_running{instance=~\"$instance\"})",
           "legendFormat": "active",
           "refId": "A"
         }
@@ -73,7 +101,7 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum(vllm:num_requests_waiting)",
+          "expr": "sum(vllm:num_requests_waiting{instance=~\"$instance\"})",
           "legendFormat": "queued",
           "refId": "A"
         }
@@ -105,12 +133,12 @@
       "id": 3,
       "type": "stat",
       "title": "KV Cache Used (avg)",
-      "description": "Average KV cache utilization across all workers",
+      "description": "Average KV cache utilization across selected workers",
       "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "avg(vllm:kv_cache_usage_perc) * 100",
+          "expr": "avg(vllm:kv_cache_usage_perc{instance=~\"$instance\"}) * 100",
           "legendFormat": "kv cache %",
           "refId": "A"
         }
@@ -144,12 +172,12 @@
       "id": 4,
       "type": "stat",
       "title": "Workers Healthy",
-      "description": "Workers currently returning metrics (scraped successfully)",
+      "description": "Workers currently returning metrics (all jobs including masheen)",
       "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "count(up{job=\"vllm-workers\"} == 1) / count(up{job=\"vllm-workers\"})",
+          "expr": "count(up{instance=~\"$instance\"} == 1) / count(up{instance=~\"$instance\"})",
           "legendFormat": "healthy",
           "refId": "A"
         }
@@ -178,15 +206,23 @@
       }
     },
     {
+      "id": 13,
+      "type": "row",
+      "title": "Per-Worker Overview",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
       "id": 5,
       "type": "timeseries",
       "title": "Requests Running per Worker",
-      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "vllm:num_requests_running",
-          "legendFormat": "{{instance}}",
+          "expr": "vllm:num_requests_running{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} ({{tier}})",
           "refId": "A"
         }
       ],
@@ -212,12 +248,12 @@
       "type": "timeseries",
       "title": "Requests Waiting per Worker",
       "description": "Non-zero means KV cache is under pressure on that worker",
-      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "vllm:num_requests_waiting",
-          "legendFormat": "{{instance}}",
+          "expr": "vllm:num_requests_waiting{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} ({{tier}})",
           "refId": "A"
         }
       ],
@@ -242,12 +278,12 @@
       "id": 7,
       "type": "timeseries",
       "title": "KV Cache Utilization % per Worker",
-      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 13, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "vllm:kv_cache_usage_perc * 100",
-          "legendFormat": "{{instance}}",
+          "expr": "vllm:kv_cache_usage_perc{instance=~\"$instance\"} * 100",
+          "legendFormat": "{{instance}} ({{tier}})",
           "refId": "A"
         }
       ],
@@ -283,17 +319,17 @@
       "type": "timeseries",
       "title": "Token Throughput (tokens/s)",
       "description": "Rate of prompt and generation tokens processed per worker",
-      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 13, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "rate(vllm:prompt_tokens_total[1m])",
-          "legendFormat": "prompt — {{instance}}",
+          "expr": "rate(vllm:prompt_tokens_total{instance=~\"$instance\"}[1m])",
+          "legendFormat": "prompt — {{instance}} ({{tier}})",
           "refId": "A"
         },
         {
-          "expr": "rate(vllm:generation_tokens_total[1m])",
-          "legendFormat": "gen — {{instance}}",
+          "expr": "rate(vllm:generation_tokens_total{instance=~\"$instance\"}[1m])",
+          "legendFormat": "gen — {{instance}} ({{tier}})",
           "refId": "B"
         }
       ],
@@ -315,25 +351,33 @@
       }
     },
     {
+      "id": 14,
+      "type": "row",
+      "title": "Latency",
+      "gridPos": { "x": 0, "y": 21, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
       "id": 9,
       "type": "timeseries",
       "title": "Time to First Token — TTFT (p50 / p95 / p99)",
-      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 22, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(vllm:time_to_first_token_seconds_bucket[5m])) by (le, instance))",
-          "legendFormat": "p50 — {{instance}}",
+          "expr": "histogram_quantile(0.50, sum(rate(vllm:time_to_first_token_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier))",
+          "legendFormat": "p50 — {{instance}} ({{tier}})",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(vllm:time_to_first_token_seconds_bucket[5m])) by (le, instance))",
-          "legendFormat": "p95 — {{instance}}",
+          "expr": "histogram_quantile(0.95, sum(rate(vllm:time_to_first_token_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier))",
+          "legendFormat": "p95 — {{instance}} ({{tier}})",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(vllm:time_to_first_token_seconds_bucket[5m])) by (le, instance))",
-          "legendFormat": "p99 — {{instance}}",
+          "expr": "histogram_quantile(0.99, sum(rate(vllm:time_to_first_token_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier))",
+          "legendFormat": "p99 — {{instance}} ({{tier}})",
           "refId": "C"
         }
       ],
@@ -358,22 +402,22 @@
       "id": 10,
       "type": "timeseries",
       "title": "End-to-End Latency (p50 / p95 / p99)",
-      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 22, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(vllm:e2e_request_latency_seconds_bucket[5m])) by (le, instance))",
-          "legendFormat": "p50 — {{instance}}",
+          "expr": "histogram_quantile(0.50, sum(rate(vllm:e2e_request_latency_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier))",
+          "legendFormat": "p50 — {{instance}} ({{tier}})",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(vllm:e2e_request_latency_seconds_bucket[5m])) by (le, instance))",
-          "legendFormat": "p95 — {{instance}}",
+          "expr": "histogram_quantile(0.95, sum(rate(vllm:e2e_request_latency_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier))",
+          "legendFormat": "p95 — {{instance}} ({{tier}})",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(vllm:e2e_request_latency_seconds_bucket[5m])) by (le, instance))",
-          "legendFormat": "p99 — {{instance}}",
+          "expr": "histogram_quantile(0.99, sum(rate(vllm:e2e_request_latency_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier))",
+          "legendFormat": "p99 — {{instance}} ({{tier}})",
           "refId": "C"
         }
       ],
@@ -399,22 +443,22 @@
       "type": "timeseries",
       "title": "Time per Output Token — TPOT (p50 / p95 / p99)",
       "description": "Inter-token latency — directly maps to perceived generation speed",
-      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le, instance)) * 1000",
-          "legendFormat": "p50 — {{instance}}",
+          "expr": "histogram_quantile(0.50, sum(rate(vllm:time_per_output_token_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier)) * 1000",
+          "legendFormat": "p50 — {{instance}} ({{tier}})",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le, instance)) * 1000",
-          "legendFormat": "p95 — {{instance}}",
+          "expr": "histogram_quantile(0.95, sum(rate(vllm:time_per_output_token_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier)) * 1000",
+          "legendFormat": "p95 — {{instance}} ({{tier}})",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le, instance)) * 1000",
-          "legendFormat": "p99 — {{instance}}",
+          "expr": "histogram_quantile(0.99, sum(rate(vllm:time_per_output_token_seconds_bucket{instance=~\"$instance\"}[5m])) by (le, instance, tier)) * 1000",
+          "legendFormat": "p99 — {{instance}} ({{tier}})",
           "refId": "C"
         }
       ],
@@ -440,12 +484,12 @@
       "type": "timeseries",
       "title": "KV Cache Preemptions (rate/5m)",
       "description": "Requests evicted from KV cache due to memory pressure — should stay near zero",
-      "gridPos": { "x": 12, "y": 28, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "rate(vllm:num_preemptions_total[5m])",
-          "legendFormat": "{{instance}}",
+          "expr": "rate(vllm:num_preemptions_total{instance=~\"$instance\"}[5m])",
+          "legendFormat": "{{instance}} ({{tier}})",
           "refId": "A"
         }
       ],

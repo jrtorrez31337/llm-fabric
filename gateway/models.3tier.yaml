@@ -1,0 +1,21 @@
+models:
+  - model_id: cyankiwi/Qwen3.5-27B-AWQ-4bit
+    vram_mb: 19000
+    kv_reserve_mb: 30000
+    aliases: [heavy, premium, reasoning]
+    pinned: true
+    max_model_len: 32768
+
+  - model_id: stelterlab/Qwen3-30B-A3B-Instruct-2507-AWQ
+    vram_mb: 17000
+    kv_reserve_mb: 26000
+    aliases: [light, fast, fast-big]
+    pinned: true
+    max_model_len: 65536
+
+  - model_id: Qwen/Qwen3-4B-Instruct-2507-AWQ
+    vram_mb: 2500
+    kv_reserve_mb: 4000
+    aliases: [fast-small]
+    pinned: false
+    max_model_len: 16384

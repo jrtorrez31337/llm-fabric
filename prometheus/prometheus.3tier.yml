@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: sswai
+
+scrape_configs:
+  - job_name: vllm-workers
+    static_configs:
+      - targets:
+          - model-heavy:8000
+        labels:
+          tier: heavy
+          node: yak
+      - targets:
+          - model-0:8000
+        labels:
+          tier: light
+          node: yak
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '([^:]+):\d+'
+        target_label: instance
+        replacement: '$1'
+
+  - job_name: masheen
+    static_configs:
+      - targets:
+          - 10.200.0.2:8001
+        labels:
+          tier: fast-small
+          node: masheen
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'masheen'

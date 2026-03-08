@@ -1,0 +1,170 @@
+# SSW AI Inference — 3-Tier Config (Config I)
+#
+# GPU layout:
+#   GPU 0 (dedicated):  model-0 (30B MoE AWQ, 0.90 util, 65K context)
+#   GPU 1 (dedicated):  model-heavy (Qwen3.5-27B dense AWQ, 0.90 util, 65K context)
+#   Masheen (remote):   fast-small worker (4B AWQ, via WireGuard 10.200.0.2:8001)
+#
+# Tier routing:
+#   "heavy"      → GPU 1 only (27B dense, premium reasoning, 65K context)
+#   "reasoning"  → GPU 1 only (same model, thinking stream enabled)
+#   "light"      → GPU 0 model-0 (30B MoE, 65K context)
+#   "fast"       → GPU 0 model-0 + masheen (2 workers)
+#   "fast-big"   → GPU 0 model-0 only (30B MoE, 65K context)
+#   "fast-small" → masheen only (4B, 16K context)
+#
+# Usage:
+#   docker compose -p sswai -f docker-compose.3tier.yml --env-file .env.3tier up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --- GPU 1 (dedicated): Heavy tier — Qwen3.5-27B dense ---
+  model-heavy:
+    image: vllm/vllm-openai:latest
+    command:
+      - --model=/models/${HEAVY_MODEL}
+      - --served-model-name=heavy
+      - --port=8000
+      - --gpu-memory-utilization=${HEAVY_GPU_MEMORY_UTILIZATION}
+      - --max-model-len=${HEAVY_MAX_MODEL_LEN}
+      - --max-num-seqs=${HEAVY_MAX_NUM_SEQS:-32}
+      - --max-num-batched-tokens=${HEAVY_MAX_NUM_BATCHED_TOKENS:-16384}
+      - --tool-call-parser=${HEAVY_TOOL_CALL_PARSER}
+      - --enable-auto-tool-choice
+      - --dtype=${HEAVY_DTYPE:-half}
+      - --quantization=${HEAVY_QUANTIZATION:-compressed-tensors}
+    volumes:
+      - ${MODEL_REPO}:/models:ro
+    ports:
+      - "127.0.0.1:8003:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+    restart: unless-stopped
+
+  # --- GPU 0 (dedicated): Light/Fast tier — 30B MoE, 65K context ---
+  model-0:
+    image: vllm/vllm-openai:latest
+    command:
+      - --model=/models/${LIGHT_MODEL}
+      - --served-model-name=light
+      - --port=8000
+      - --gpu-memory-utilization=${LIGHT_GPU_MEMORY_UTILIZATION}
+      - --max-model-len=${LIGHT_MAX_MODEL_LEN}
+      - --max-num-seqs=${LIGHT_MAX_NUM_SEQS:-32}
+      - --max-num-batched-tokens=${LIGHT_MAX_NUM_BATCHED_TOKENS:-32768}
+      - --tool-call-parser=${LIGHT_TOOL_CALL_PARSER}
+      - --enable-auto-tool-choice
+      - --dtype=${LIGHT_DTYPE:-half}
+      - --quantization=${LIGHT_QUANTIZATION:-compressed-tensors}
+    volumes:
+      - ${MODEL_REPO}:/models:ro
+    ports:
+      - "127.0.0.1:8001:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+    restart: unless-stopped
+
+  gateway:
+    build: ./gateway
+    ports:
+      - "0.0.0.0:${GATEWAY_PORT:-8000}:8000"
+    volumes:
+      - ${MODEL_REPO}:/models:ro
+      - ./gateway/models.3tier.yaml:/app/models.yaml:ro
+    environment:
+      - GATEWAY_HEAVY_WORKERS=http://model-heavy:8000
+      - GATEWAY_LIGHT_WORKERS=http://model-0:8000
+      - GATEWAY_FAST_WORKERS=http://model-0:8000,http://10.200.0.2:8001
+      - GATEWAY_FAST_BIG_WORKERS=http://model-0:8000
+      - GATEWAY_FAST_SMALL_WORKERS=http://10.200.0.2:8001
+      - GATEWAY_POOL_SERVED_NAMES=fast:light,fast-big:light,fast-small:light
+      - GATEWAY_REDIS_URL=redis://redis:6379/0
+      - GATEWAY_MODELS_DIR=/models
+      - GATEWAY_MODELS_YAML_PATH=/app/models.yaml
+      - GATEWAY_LOADER_URL=http://loader:8001
+    depends_on:
+      redis:
+        condition: service_healthy
+      model-heavy:
+        condition: service_healthy
+      model-0:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  loader:
+    build: ./loader
+    ports:
+      - "127.0.0.1:${LOADER_PORT:-8011}:8001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${MODEL_REPO}:/models:ro
+      - ./gateway/models.3tier.yaml:/app/models.yaml:ro
+    environment:
+      - LOADER_GATEWAY_URL=http://gateway:8000
+      - LOADER_MODELS_DIR=/models
+      - LOADER_MODELS_YAML_PATH=/app/models.yaml
+      - LOADER_DOCKER_NETWORK=${LOADER_DOCKER_NETWORK:-sswai_default}
+      - LOADER_VLLM_IMAGE=vllm/vllm-openai:latest
+      - LOADER_PORT_START=9000
+      - LOADER_PORT_END=9099
+      - LOADER_NUM_GPUS=2
+      - LOADER_CONTAINER_PREFIX=${LOADER_CONTAINER_PREFIX:-ssw}
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  redis-data:

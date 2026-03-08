@@ -44,20 +44,37 @@ _health_task: asyncio.Task | None = None
 # Lifespan
 # ---------------------------------------------------------------------------
 def _register_static_workers():
-    """Register workers from legacy env vars (backward compat)."""
-    for url in settings.heavy_workers.split(","):
-        url = url.strip()
-        if url:
-            pool_mgr.register_worker("heavy", url)
-    for url in settings.light_workers.split(","):
-        url = url.strip()
-        if url:
-            pool_mgr.register_worker("light", url)
-    log.info(
-        "Static workers registered: heavy=%d, light=%d",
-        pool_mgr.get_pool("heavy").worker_count() if pool_mgr.get_pool("heavy") else 0,
-        pool_mgr.get_pool("light").worker_count() if pool_mgr.get_pool("light") else 0,
-    )
+    """Register workers from env vars into named pools."""
+    # Parse served-name overrides: "fast:light,fast-big:light" → {fast: light, ...}
+    served_name_map: dict[str, str] = {}
+    for pair in settings.pool_served_names.split(","):
+        pair = pair.strip()
+        if ":" in pair:
+            pname, sname = pair.split(":", 1)
+            served_name_map[pname.strip()] = sname.strip()
+
+    for pool_name, csv in [
+        ("heavy", settings.heavy_workers),
+        ("light", settings.light_workers),
+        ("fast", settings.fast_workers),
+        ("fast-big", settings.fast_big_workers),
+        ("fast-small", settings.fast_small_workers),
+    ]:
+        for url in csv.split(","):
+            url = url.strip()
+            if url:
+                pool_mgr.register_worker(pool_name, url)
+        # Apply served_name override if configured
+        pool = pool_mgr.get_pool(pool_name)
+        if pool and pool_name in served_name_map:
+            pool.served_name = served_name_map[pool_name]
+
+    pools_summary = {
+        name: pool_mgr.get_pool(name).worker_count()
+        for name in ("heavy", "light", "fast", "fast-big", "fast-small")
+        if pool_mgr.get_pool(name)
+    }
+    log.info("Static workers registered: %s", pools_summary)
 
 
 @asynccontextmanager
@@ -85,6 +102,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SSW AI Gateway", lifespan=lifespan)
+
+# API key validation — accept any key when GATEWAY_API_KEYS is empty
+_valid_keys: set[str] = set()
+if settings.api_keys:
+    _valid_keys = {k.strip() for k in settings.api_keys.split(",") if k.strip()}
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    if _valid_keys and request.url.path.startswith("/v1/"):
+        auth = request.headers.get("authorization", "")
+        token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
+        if not token or token not in _valid_keys:
+            return _oai_error(401, "Invalid API key", error_type="authentication_error",
+                              code="invalid_api_key")
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -197,10 +230,10 @@ def _select_worker(model: str) -> tuple[str, str, ModelInfo | None]:
     return pool_name, url, info
 
 
-def _worker_body(body: dict, pool_name: str) -> dict:
+def _worker_body(body: dict, served_name: str) -> dict:
     """Return request body normalized for worker-served model names."""
     worker_body = dict(body)
-    worker_body["model"] = pool_name
+    worker_body["model"] = served_name
     return worker_body
 
 
@@ -329,11 +362,13 @@ async def _execute_queued_request(entry: dict):
         })
         return
 
-    if model_info and model_info.thinking_suppression:
+    if model_info and model_info.thinking_suppression and model != "reasoning":
         body.setdefault("chat_template_kwargs", {})["enable_thinking"] = False
 
     target = f"{worker_url}/v1/chat/completions"
-    worker_body = _worker_body(body, pool_name)
+    pool = pool_mgr.get_pool(pool_name)
+    served_name = pool.served_name if pool else pool_name
+    worker_body = _worker_body(body, served_name)
     worker_body["stream"] = False
 
     try:
@@ -470,13 +505,15 @@ async def chat_completions(request: Request):
     except RuntimeError as e:
         return _oai_error(503, str(e), error_type="server_error", code="engine_overloaded")
 
-    # Thinking suppression based on registry
-    if model_info and model_info.thinking_suppression:
+    # Thinking suppression — enabled by default for Qwen3 family,
+    # but "reasoning" alias explicitly keeps thinking on
+    if model_info and model_info.thinking_suppression and model != "reasoning":
         body.setdefault("chat_template_kwargs", {})["enable_thinking"] = False
 
     pool = pool_mgr.get_pool(pool_name)
     target = f"{worker_url}/v1/chat/completions"
-    worker_body = _worker_body(body, pool_name)
+    served_name = pool.served_name if pool else pool_name
+    worker_body = _worker_body(body, served_name)
     t0 = time.monotonic()
 
     # --- Streaming ---
