@@ -328,8 +328,11 @@ Implementation Status:
 25. ✅ Config H (30B MoE) Trial — 2,151 req/hr, 10.9s TTFT p50, 33.6s E2E avg, 1 preemption; dominates E and F on all infra metrics; 6.5% length-exceeded needs investigation (yaklog infra#137, handoff#138)
 26. ✅ Production CLI — unified `./sswai` script (start/stop/restart/status/health/logs/gpu/metrics/test/config) wired to Config H
 27. ✅ Length-exceeded mitigation — raised max_model_len from 49,152 to 65,536 (MoE native 262K, no rope scaling); should eliminate most of the 5.2% length-exceeded tail
-28. ✅ Distributed Cluster — masheen node (RTX 2080, Qwen3-4B-AWQ) joined via WireGuard; yak gateway routes to 3 workers (2 local MoE + 1 remote 4B); both nodes systemd boot-start
-29. Next: Agent behavioral audit under Config H — compare quality with previous audits (#75 Config E, #136 E vs F)
+28. ✅ Distributed Cluster — masheen node (RTX 2080, Qwen3-4B-AWQ) joined via WireGuard; both nodes systemd boot-start
+29. ✅ Fast Tier Isolation — removed masheen from yak light pool (was degrading 33% of requests); added masheen to Prometheus; comparative analysis confirms 4B viable for gates/classification/extraction (infra#163)
+30. ✅ Platform Reframe — general-purpose private-network AI backbone, not SSW-specific; master control agent (traptop10k-claude) designated (infra#166)
+31. Pending: masheen model upgrade to Qwen3-4B-Instruct-2507-AWQ (handoff#165, needs shell access on masheen)
+32. Next: Repo migration — archive ssw-llm-server, create general-purpose repo
 
 ---
 
@@ -522,11 +525,22 @@ Masheen runs its own full sswai stack (redis + vLLM + gateway + loader).
 
 ### Integration with Yak Gateway
 
-Yak gateway (docker-compose.30b-moe.yml) adds masheen as a third light worker:
-  GATEWAY_LIGHT_WORKERS=http://model-0:8000,http://model-1:8000,http://10.200.0.2:8001
+Masheen is **isolated from yak's light pool** (removed 2026-03-08, commit 4a47563).
+Previously mixed with 30B workers — randomly degraded 33% of requests.
 
-Port 8001 is masheen raw vLLM port (bound 0.0.0.0 so Docker containers on yak
-can reach it through the host WireGuard interface).
+Masheen vLLM (:8001) is scraped by yak's Prometheus (instance: "masheen") for unified monitoring.
+The raw vLLM port is bound 0.0.0.0 so yak Prometheus can reach it via WireGuard.
+
+### Fast Tier (pending)
+
+Masheen is designated for a `fast` tier — quick-decision tasks (classification, yes/no gates,
+extraction, tool calls) where latency matters more than reasoning depth.
+
+Analysis (infra#163): 4B is equivalent to 30B on gates/classification/extraction/tool calls,
+weaker on multi-step reasoning. Supports a separate alias for appropriate task routing.
+
+Model upgrade pending (handoff#165): swap to Qwen3-4B-Instruct-2507-AWQ (ranked #1 at 4B size).
+Requires download directly on masheen — no SSH from yak.
 
 ### Shared Repo
 
