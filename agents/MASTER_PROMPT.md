@@ -181,18 +181,19 @@ Config I (3-tier, docker-compose.3tier.yml + .env.3tier):
 - Agent guidance: default to light for simple tasks, heavy for general work; reasoning/premium for premium tasks
 - Switch: docker compose -p sswai -f docker-compose.3tier.yml --env-file .env.3tier up -d
 
-Config J (capacity mode, standalone containers) — ACTIVE:
-- GPU 0: light-0 (Qwen3-30B-A3B MoE AWQ, 0.90 gpu-mem-util, ~16GB weights, ~25GB KV, 272K token KV cache)
-- GPU 1: light-1 (Qwen3-30B-A3B MoE AWQ, 0.90 gpu-mem-util, ~16GB weights, ~25GB KV, 272K token KV cache)
+Config J (capacity mode, docker-compose.capacity.yml + .env.capacity) — ACTIVE:
+- GPU 0: light-0 (Qwen3-30B-A3B MoE AWQ, 0.90 util, 65K context, 242K KV cache, 3.7x concurrency)
+- GPU 1: light-1 (Qwen3-30B-A3B MoE AWQ, 0.90 util, 262K context, 272K KV cache, 1.0x concurrency) — cooler GPU, long-context
 - Masheen (remote): Qwen3-4B-Instruct-2507-AWQ via WireGuard at 10.200.0.2:8001
 - 3 workers total across 2 nodes, 2 models, 3 aliases:
-  - light → light-0 + light-1 (30B MoE, 65K context) — primary workhorse
-  - heavy → light-0 + light-1 (30B MoE, 65K context) — same pool, alias compat
   - fast → masheen (4B, 16K context) — low-latency simple tasks
-- Pool→served_name mapping: heavy→light (both aliases hit the same MoE workers)
-- Workers are standalone `docker run` containers (not compose-managed) for independent GPU control
+  - light → light-0 + light-1 (30B MoE) — client believes 64K limit
+  - heavy → light-1 only (30B MoE, 262K actual) — client believes 128K limit
+- Pool→served_name mapping: heavy→light
+- Container names pinned via container_name (light-0, light-1, sswai-gateway)
 - Reasoning/premium aliases: offline (27B dense not loaded)
-- Switch: manual docker run commands (see infra yaklog #188)
+- GPU 1 runs cooler — gets the long-context heavy alias exclusively
+- Switch: docker compose -p sswai -f docker-compose.capacity.yml --env-file .env.capacity up -d
 
 Historical Production Metrics (2026-02-22 snapshot, 11h window, mixed-era):
 - 6,913 requests total: heavy 5,024 (72.7%), light 1,889 (27.3%)
@@ -274,14 +275,14 @@ Three-Way Bakeoff Verdict (E vs F vs H, same code, 12 agents, yaklog infra#137, 
 
 Current Runtime Snapshot (2026-03-10):
 - Cluster: 2-node (yak + masheen) via WireGuard overlay (10.200.0.0/24)
-- Yak: Config J RUNNING — capacity mode (standalone containers):
-  - GPU 0: Qwen3-30B-A3B MoE AWQ (light-0, 0.90 util, 65K context) — "light"/"heavy" tier
-  - GPU 1: Qwen3-30B-A3B MoE AWQ (light-1, 0.90 util, 65K context) — "light"/"heavy" tier
-- Masheen: Qwen3-4B-Instruct-2507-AWQ × 1 worker (RTX 2080) — "fast" tier
+- Yak: Config J RUNNING — capacity mode (compose-managed):
+  - GPU 0: Qwen3-30B-A3B MoE AWQ (light-0, 0.90 util, 65K context) — light pool
+  - GPU 1: Qwen3-30B-A3B MoE AWQ (light-1, 0.90 util, 262K context) — light + heavy pools (cooler GPU)
+- Masheen: Qwen3-4B-Instruct-2507-AWQ × 1 worker (RTX 2080) — fast pool
 - Gateway routes 3 aliases across 3 workers on 2 nodes:
-  - light → light-0 + light-1 (30B MoE, 65K) — primary workhorse
-  - heavy → light-0 + light-1 (30B MoE, 65K) — alias compat
   - fast → masheen (4B, 16K) — low-latency simple tasks
+  - light → light-0 + light-1 (30B MoE) — client believes 64K limit
+  - heavy → light-1 only (30B MoE, 262K actual) — client believes 128K limit
 - Reasoning/premium: offline (27B dense not loaded)
 - Observability: Prometheus (:9090) + Grafana (:3000) scraping light-0, light-1, masheen with tier/node labels
 - CLI: `./sswai start|stop|health|gpu|metrics|test` (yak), `./masheen start|stop|health|gpu|test` (masheen)
@@ -298,7 +299,9 @@ Key Files:
 - docker-compose.32b-gpu1.yml + .env.32b-gpu1 — Config G: 1 worker GPU 1, 32B-AWQ, 49K context
 - docker-compose.30b-moe.yml + .env.30b-moe — Config H: 2 workers 1/GPU, 30B-MoE-AWQ, 64K context
 - docker-compose.3tier.yml + .env.3tier — Config I: 3-tier (reasoning/premium GPU 1 27B dense, heavy GPU 0 30B MoE, light masheen 4B)
+- docker-compose.capacity.yml + .env.capacity — Config J: capacity mode (light-0 GPU 0 65K, light-1 GPU 1 262K, fast masheen)
 - gateway/models.3tier.yaml — 3-tier model registry (reasoning/premium→27B dense, heavy→30B MoE, light→4B)
+- gateway/models.capacity.yaml — capacity mode registry (light+heavy→30B MoE, fast→4B)
 - docker-compose.observability.yml — Prometheus + Grafana, shares sswai_default network (uses 3tier Prometheus config)
 - prometheus/prometheus.3tier.yml — 3-target scrape config with tier/node labels (light-0, light-1, masheen)
 - prometheus/prometheus.{14b-4worker,32b,32b-gpu1,30b-moe}.yml — legacy per-profile scrape configs
@@ -377,9 +380,9 @@ Implementation Status:
 35. ✅ API Key Support — gateway accepts Bearer tokens; open by default (GATEWAY_API_KEYS), restrictable
 36. ✅ Alias Restructure — semantic naming: light=4B masheen, heavy=30B MoE (GPU 0), reasoning=27B dense thinking-on (GPU 1), premium=27B dense thinking-off (GPU 1)
 37. ✅ 3-Tier Observability — Prometheus scrapes 3 workers with tier/node labels; Grafana dashboard updated with tier/instance filter dropdowns
-38. ✅ Config J — capacity mode: both A40s run identical 30B MoE (light-0 GPU 0, light-1 GPU 1), 65K context; light+heavy→both MoEs, fast→masheen 4B; reasoning/premium offline; standalone docker containers for independent GPU control (yaklog infra#188)
-39. ⚠️ GPU 1 thermal shutdown — A40 hit thermal protection (~101°C), driver lost handle, PCI reset failed; reboot required. Both GPUs running hot (0% fan = passive cooling, needs chassis airflow). See agents/HARDWARE_ISSUES.md
-40. Next: Post-reboot — verify GPU 1 recovery, address thermal cooling, update sswai CLI + systemd for Config J
+38. ✅ Config J — capacity mode with asymmetric context: light-0 (GPU 0, 65K), light-1 (GPU 1, 262K); fast→masheen 16K, light→both GPUs (client 64K), heavy→GPU 1 only (client 128K, actual 262K); compose-managed with pinned container names; reasoning/premium offline (yaklog infra#188)
+39. ✅ GPU 1 thermal shutdown + recovery — A40 hit thermal protection (~101°C), PCI reset failed, reboot recovered GPU 1. Sysadmin agent deployed thermal management tool. Post-reboot temps: 58-63°C. See agents/HARDWARE_ISSUES.md
+40. Next: Update sswai CLI + systemd for Config J; update docs for general-purpose consumers
 
 ---
 

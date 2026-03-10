@@ -1,0 +1,139 @@
+# SSW AI Inference — Config J (Capacity Mode)
+#
+# GPU layout:
+#   GPU 0: light-0 (30B MoE AWQ, 0.90 util, 65K context) — runs hotter
+#   GPU 1: light-1 (30B MoE AWQ, 0.90 util, 262K context) — cooler, long-context
+#   Masheen (remote): fast tier (4B AWQ, via WireGuard 10.200.0.2:8001, 16K context)
+#
+# Aliases:
+#   "fast"  → masheen only (16K)
+#   "light" → light-0 + light-1 (client believes 64K)
+#   "heavy" → light-1 only (client believes 128K, actual 262K)
+#
+# Usage:
+#   docker compose -p sswai -f docker-compose.capacity.yml --env-file .env.capacity up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --- GPU 0: light-0 — 30B MoE AWQ, 65K context (runs hotter) ---
+  light-0:
+    container_name: light-0
+    image: vllm/vllm-openai:latest
+    command:
+      - --model=/models/${MOE_MODEL}
+      - --served-model-name=light
+      - --port=8000
+      - --gpu-memory-utilization=${MOE_GPU_MEMORY_UTILIZATION}
+      - --max-model-len=${MOE_MAX_MODEL_LEN_0}
+      - --max-num-seqs=${MOE_MAX_NUM_SEQS:-32}
+      - --max-num-batched-tokens=${MOE_MAX_NUM_BATCHED_TOKENS:-32768}
+      - --tool-call-parser=${MOE_TOOL_CALL_PARSER:-hermes}
+      - --enable-auto-tool-choice
+      - --dtype=${MOE_DTYPE:-half}
+      - --quantization=${MOE_QUANTIZATION:-compressed-tensors}
+    volumes:
+      - ${MODEL_REPO}:/models:ro
+    ports:
+      - "127.0.0.1:8001:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+    restart: unless-stopped
+
+  # --- GPU 1: light-1 — 30B MoE AWQ, 262K context (cooler GPU, long-context) ---
+  light-1:
+    container_name: light-1
+    image: vllm/vllm-openai:latest
+    command:
+      - --model=/models/${MOE_MODEL}
+      - --served-model-name=light
+      - --port=8000
+      - --gpu-memory-utilization=${MOE_GPU_MEMORY_UTILIZATION}
+      - --max-model-len=${MOE_MAX_MODEL_LEN_1}
+      - --max-num-seqs=${MOE_MAX_NUM_SEQS:-32}
+      - --max-num-batched-tokens=${MOE_MAX_NUM_BATCHED_TOKENS:-32768}
+      - --tool-call-parser=${MOE_TOOL_CALL_PARSER:-hermes}
+      - --enable-auto-tool-choice
+      - --dtype=${MOE_DTYPE:-half}
+      - --quantization=${MOE_QUANTIZATION:-compressed-tensors}
+    volumes:
+      - ${MODEL_REPO}:/models:ro
+    ports:
+      - "127.0.0.1:8002:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+    restart: unless-stopped
+
+  gateway:
+    container_name: sswai-gateway
+    build: ./gateway
+    ports:
+      - "0.0.0.0:${GATEWAY_PORT:-8000}:8000"
+    volumes:
+      - ${MODEL_REPO}:/models:ro
+      - ./gateway/models.capacity.yaml:/app/models.yaml:ro
+    environment:
+      - GATEWAY_LIGHT_WORKERS=http://light-0:8000,http://light-1:8000
+      - GATEWAY_HEAVY_WORKERS=http://light-1:8000
+      - GATEWAY_FAST_WORKERS=http://10.200.0.2:8001
+      - GATEWAY_POOL_SERVED_NAMES=heavy:light
+      - GATEWAY_REDIS_URL=redis://redis:6379/0
+      - GATEWAY_MODELS_DIR=/models
+      - GATEWAY_MODELS_YAML_PATH=/app/models.yaml
+      - GATEWAY_LOADER_URL=http://loader:8001
+    depends_on:
+      redis:
+        condition: service_healthy
+      light-0:
+        condition: service_healthy
+      light-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  redis-data:

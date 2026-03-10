@@ -28,16 +28,21 @@
 - GPU 1 likely hit thermal protection threshold and shut down at hardware level
 - A40 thermal throttle starts at 83°C, max operating temp is 92°C — we were 10-20°C over
 
+### Resolution
+- **Reboot** restored GPU 1 fully (all recovery attempts without reboot failed)
+- Sysadmin agent deployed thermal management tooling
+- Post-reboot temps: GPU 0 = 58°C, GPU 1 = 55°C at idle; 59°C / 63°C under load
+- Config J redeployed successfully via compose with asymmetric context (GPU 0: 65K, GPU 1: 262K)
+
 ### Action Items
-- [ ] Check chassis airflow — yak needs strong front-to-back ventilation for 2× A40 under load
-- [ ] Consider adding case fans or improving rack airflow
+- [x] Reboot to recover GPU 1 — successful
+- [x] Thermal management — sysadmin agent deployed tooling, temps now stable 58-63°C
 - [ ] Monitor GPU temps via Prometheus/Grafana (vLLM exposes `vllm:gpu_temperature_celsius` or use `nvidia_smi_exporter`)
-- [ ] Consider lowering `--gpu-memory-utilization` from 0.90 if thermals remain problematic
 - [ ] Add thermal alerts to observability stack (alert at 85°C, critical at 90°C)
 - [ ] Investigate whether MoE workloads generate more heat than dense models (128-expert routing = higher compute utilization)
 
 ### Config at Time of Failure
-- Config J: capacity mode
+- Config J: capacity mode (standalone containers, before compose migration)
 - GPU 0: light-0 — Qwen3-30B-A3B MoE AWQ, 0.90 util, 65K context
 - GPU 1: light-1 — Qwen3-30B-A3B MoE AWQ, 0.90 util, 65K context (failed)
-- Ambient conditions: unknown, needs baseline measurement
+- Ambient conditions: inadequate chassis airflow for dual-GPU sustained load

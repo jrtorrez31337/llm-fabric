@@ -1,0 +1,14 @@
+models:
+  - model_id: stelterlab/Qwen3-30B-A3B-Instruct-2507-AWQ
+    vram_mb: 17000
+    kv_reserve_mb: 26000
+    aliases: [light, heavy]
+    pinned: true
+    max_model_len: 131072
+
+  - model_id: Qwen/Qwen3-4B-Instruct-2507-AWQ
+    vram_mb: 2500
+    kv_reserve_mb: 4000
+    aliases: [fast]
+    pinned: false
+    max_model_len: 16384
