@@ -8,12 +8,12 @@ scrape_configs:
   - job_name: vllm-workers
     static_configs:
       - targets:
-          - model-heavy:8000
+          - light-0:8000
         labels:
-          tier: heavy
+          tier: light
           node: yak
       - targets:
-          - model-0:8000
+          - light-1:8000
         labels:
           tier: light
           node: yak
@@ -28,7 +28,7 @@ scrape_configs:
       - targets:
           - 10.200.0.2:8001
         labels:
-          tier: fast-small
+          tier: fast
           node: masheen
     relabel_configs:
       - source_labels: [__address__]

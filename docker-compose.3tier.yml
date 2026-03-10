@@ -3,15 +3,13 @@
 # GPU layout:
 #   GPU 0 (dedicated):  model-0 (30B MoE AWQ, 0.90 util, 65K context)
 #   GPU 1 (dedicated):  model-heavy (Qwen3.5-27B dense AWQ, 0.90 util, 65K context)
-#   Masheen (remote):   fast-small worker (4B AWQ, via WireGuard 10.200.0.2:8001)
+#   Masheen (remote):   light worker (4B AWQ, via WireGuard 10.200.0.2:8001, 16K context)
 #
 # Tier routing:
-#   "heavy"      → GPU 1 only (27B dense, premium reasoning, 65K context)
-#   "reasoning"  → GPU 1 only (same model, thinking stream enabled)
-#   "light"      → GPU 0 model-0 (30B MoE, 65K context)
-#   "fast"       → GPU 0 model-0 + masheen (2 workers)
-#   "fast-big"   → GPU 0 model-0 only (30B MoE, 65K context)
-#   "fast-small" → masheen only (4B, 16K context)
+#   "light"      → masheen only (4B, 16K context)
+#   "heavy"      → GPU 0 model-0 (30B MoE, 65K context)
+#   "reasoning"  → GPU 1 model-heavy (27B dense, thinking ON, 65K context)
+#   "premium"    → GPU 1 model-heavy (27B dense, thinking OFF, 65K context)
 #
 # Usage:
 #   docker compose -p sswai -f docker-compose.3tier.yml --env-file .env.3tier up -d
@@ -30,7 +28,7 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # --- GPU 1 (dedicated): Heavy tier — Qwen3.5-27B dense ---
+  # --- GPU 1 (dedicated): Reasoning/Premium — Qwen3.5-27B dense ---
   model-heavy:
     image: vllm/vllm-openai:latest
     command:
@@ -67,7 +65,7 @@ services:
       start_period: 300s
     restart: unless-stopped
 
-  # --- GPU 0 (dedicated): Light/Fast tier — 30B MoE, 65K context ---
+  # --- GPU 0 (dedicated): Heavy tier — 30B MoE, 65K context ---
   model-0:
     image: vllm/vllm-openai:latest
     command:
@@ -112,12 +110,11 @@ services:
       - ${MODEL_REPO}:/models:ro
       - ./gateway/models.3tier.yaml:/app/models.yaml:ro
     environment:
-      - GATEWAY_HEAVY_WORKERS=http://model-heavy:8000
-      - GATEWAY_LIGHT_WORKERS=http://model-0:8000
-      - GATEWAY_FAST_WORKERS=http://model-0:8000,http://10.200.0.2:8001
-      - GATEWAY_FAST_BIG_WORKERS=http://model-0:8000
-      - GATEWAY_FAST_SMALL_WORKERS=http://10.200.0.2:8001
-      - GATEWAY_POOL_SERVED_NAMES=fast:light,fast-big:light,fast-small:light
+      - GATEWAY_HEAVY_WORKERS=http://model-0:8000
+      - GATEWAY_LIGHT_WORKERS=http://10.200.0.2:8001
+      - GATEWAY_REASONING_WORKERS=http://model-heavy:8000
+      - GATEWAY_PREMIUM_WORKERS=http://model-heavy:8000
+      - GATEWAY_POOL_SERVED_NAMES=heavy:light,reasoning:heavy,premium:heavy
       - GATEWAY_REDIS_URL=redis://redis:6379/0
       - GATEWAY_MODELS_DIR=/models
       - GATEWAY_MODELS_YAML_PATH=/app/models.yaml

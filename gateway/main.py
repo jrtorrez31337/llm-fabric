@@ -59,6 +59,8 @@ def _register_static_workers():
         ("fast", settings.fast_workers),
         ("fast-big", settings.fast_big_workers),
         ("fast-small", settings.fast_small_workers),
+        ("reasoning", settings.reasoning_workers),
+        ("premium", settings.premium_workers),
     ]:
         for url in csv.split(","):
             url = url.strip()

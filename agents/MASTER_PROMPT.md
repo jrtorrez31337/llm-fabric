@@ -71,7 +71,7 @@ Loader Service (:8001)  ─── 127.0.0.1 only
 Design Decisions (LOCKED):
 - Serving engine: vLLM
 - Model discovery: auto-scan /data/models, merge with models.yaml overrides
-- Default aliases are profile-driven; active runtime (2026-03-08) uses Config I (3-tier): heavy/premium/reasoning → Qwen3.5-27B (GPU 1), light/fast/fast-big → 30B MoE (GPU 0 ×2), fast-small → 4B (masheen)
+- Default aliases are profile-driven; active runtime (2026-03-10) uses Config J (capacity mode): light+heavy → 2× 30B MoE (GPU 0 + GPU 1), fast → 4B (masheen)
 - Available models: 11 vLLM-compatible models on disk (7 AWQ, 1 compressed-tensors, 3 BF16)
 - Routing: registry-driven alias resolution → least-loaded routing across healthy workers per pool
 - Burst handling: vLLM's continuous batcher absorbs concurrency natively
@@ -96,8 +96,8 @@ Available Models (10 vLLM-compatible):
 - Qwen/Qwen3-14B-AWQ: ~10.4GB VRAM, qwen3, AWQ
 - Qwen/Qwen3-32B-AWQ: ~18.5GB VRAM, qwen3, AWQ, 64 layers, 8 KV heads
 - Qwen/Qwen3-4B-Instruct-2507-AWQ: ~2.8GB VRAM, qwen3, AWQ
-- cyankiwi/Qwen3.5-27B-AWQ-4bit: ~19GB VRAM, qwen3_5 (Gated Delta Networks), compressed-tensors, 64 layers (16 full attn + 48 linear), qwen3_coder parser (PRODUCTION — heavy tier)
-- stelterlab/Qwen3-30B-A3B-Instruct-2507-AWQ: ~16GB VRAM, qwen3_moe, compressed-tensors, 128 experts, 8 active/token (PRODUCTION — light/fast tier)
+- cyankiwi/Qwen3.5-27B-AWQ-4bit: ~19GB VRAM, qwen3_5 (Gated Delta Networks), compressed-tensors, 64 layers (16 full attn + 48 linear), qwen3_coder parser (available, not active in Config J)
+- stelterlab/Qwen3-30B-A3B-Instruct-2507-AWQ: ~16GB VRAM, qwen3_moe, compressed-tensors, 128 experts, 8 active/token (PRODUCTION — light tier, 2× workers)
 - meta-llama/Llama-3.1-8B-Instruct: ~16GB VRAM, llama, BF16, llama3_json parser
 - mistralai/Mistral-7B-Instruct-v0.2: ~14.8GB VRAM, mistral, BF16, mistral parser
 - Orion-zhen/Qwen2.5-7B-Instruct-Uncensored: ~15.2GB VRAM, qwen2, BF16
@@ -168,20 +168,31 @@ Config H (30b-moe, docker-compose.30b-moe.yml + .env.30b-moe):
 - Model: stelterlab/Qwen3-30B-A3B-Instruct-2507-AWQ (community AWQ, 16GB on disk)
 - Switch: ./start-30b-moe.sh / ./stop-30b-moe.sh
 
-Config I (3-tier, docker-compose.3tier.yml + .env.3tier) — PRODUCTION:
-- GPU 0 (shared): model-0 + model-1 (2× Qwen3-30B-A3B MoE AWQ, 0.45 gpu-mem-util each, sequential startup)
+Config I (3-tier, docker-compose.3tier.yml + .env.3tier):
+- GPU 0 (dedicated): model-0 (Qwen3-30B-A3B MoE AWQ, 0.90 gpu-mem-util, ~17GB weights, ~26GB KV)
 - GPU 1 (dedicated): model-heavy (Qwen3.5-27B-AWQ-4bit dense, 0.90 gpu-mem-util, ~19GB weights, ~24GB KV)
 - Masheen (remote): Qwen3-4B-Instruct-2507-AWQ via WireGuard at 10.200.0.2:8001
-- 4 workers total across 2 nodes, 3 models, 5 tiers:
-  - heavy/premium → GPU 1 (27B dense, thinking suppressed, 65K context)
-  - reasoning → GPU 1 (same model, thinking ENABLED for chain-of-thought)
-  - light → GPU 0 model-0 + model-1 (30B MoE, 16K context)
-  - fast → GPU 0 model-0 + model-1 + masheen (3 workers, 16K context)
-  - fast-big → GPU 0 model-0 + model-1 only (30B MoE, 16K context)
-  - fast-small → masheen only (4B, 16K context)
-- Pool→served_name mapping: fast/fast-big/fast-small workers serve as model="light" in vLLM
-- Agent guidance: default to light/fast; heavy is restricted, data-driven, auditable
+- 3 workers total across 2 nodes, 3 models, 4 aliases:
+  - light → masheen (4B, 16K context) — simple tasks, classification, extraction
+  - heavy → GPU 0 model-0 (30B MoE, 65K context) — general purpose workhorse
+  - reasoning → GPU 1 model-heavy (27B dense, thinking ON, 65K context) — chain-of-thought
+  - premium → GPU 1 model-heavy (27B dense, thinking OFF, 65K context) — clean output
+- Pool→served_name mapping: heavy→light (MoE serves as "light" in vLLM), reasoning/premium→heavy
+- Agent guidance: default to light for simple tasks, heavy for general work; reasoning/premium for premium tasks
 - Switch: docker compose -p sswai -f docker-compose.3tier.yml --env-file .env.3tier up -d
+
+Config J (capacity mode, standalone containers) — ACTIVE:
+- GPU 0: light-0 (Qwen3-30B-A3B MoE AWQ, 0.90 gpu-mem-util, ~16GB weights, ~25GB KV, 272K token KV cache)
+- GPU 1: light-1 (Qwen3-30B-A3B MoE AWQ, 0.90 gpu-mem-util, ~16GB weights, ~25GB KV, 272K token KV cache)
+- Masheen (remote): Qwen3-4B-Instruct-2507-AWQ via WireGuard at 10.200.0.2:8001
+- 3 workers total across 2 nodes, 2 models, 3 aliases:
+  - light → light-0 + light-1 (30B MoE, 65K context) — primary workhorse
+  - heavy → light-0 + light-1 (30B MoE, 65K context) — same pool, alias compat
+  - fast → masheen (4B, 16K context) — low-latency simple tasks
+- Pool→served_name mapping: heavy→light (both aliases hit the same MoE workers)
+- Workers are standalone `docker run` containers (not compose-managed) for independent GPU control
+- Reasoning/premium aliases: offline (27B dense not loaded)
+- Switch: manual docker run commands (see infra yaklog #188)
 
 Historical Production Metrics (2026-02-22 snapshot, 11h window, mixed-era):
 - 6,913 requests total: heavy 5,024 (72.7%), light 1,889 (27.3%)
@@ -261,18 +272,18 @@ Three-Way Bakeoff Verdict (E vs F vs H, same code, 12 agents, yaklog infra#137, 
 - Config H concern: 6.5% length-exceeded rate needs investigation (thinking leak, model verbosity, or max_model_len tuning)
 - Recommendation: Config H (30B MoE) for production, with length-exceeded mitigation as next priority
 
-Current Runtime Snapshot (2026-03-08):
+Current Runtime Snapshot (2026-03-10):
 - Cluster: 2-node (yak + masheen) via WireGuard overlay (10.200.0.0/24)
-- Yak: Config I RUNNING — 3-tier architecture:
-  - GPU 0: 2× Qwen3-30B-A3B MoE AWQ (model-0 + model-1, 0.45 util each, 16K context)
-  - GPU 1: 1× Qwen3.5-27B-AWQ-4bit dense (model-heavy, 0.90 util, 65K context)
-- Masheen: Qwen3-4B-Instruct-2507-AWQ × 1 worker (RTX 2080), fast-small tier
-- Gateway routes 5 aliases across 4 workers on 2 nodes:
-  - heavy/premium → model-heavy (GPU 1), reasoning → model-heavy (thinking enabled)
-  - light → model-0 + model-1 (GPU 0)
-  - fast → model-0 + model-1 + masheen (3 workers)
-  - fast-big → model-0 + model-1 (GPU 0 only), fast-small → masheen only
-- Observability: Prometheus (:9090) + Grafana (:3000) scraping all 4 workers with tier/node labels
+- Yak: Config J RUNNING — capacity mode (standalone containers):
+  - GPU 0: Qwen3-30B-A3B MoE AWQ (light-0, 0.90 util, 65K context) — "light"/"heavy" tier
+  - GPU 1: Qwen3-30B-A3B MoE AWQ (light-1, 0.90 util, 65K context) — "light"/"heavy" tier
+- Masheen: Qwen3-4B-Instruct-2507-AWQ × 1 worker (RTX 2080) — "fast" tier
+- Gateway routes 3 aliases across 3 workers on 2 nodes:
+  - light → light-0 + light-1 (30B MoE, 65K) — primary workhorse
+  - heavy → light-0 + light-1 (30B MoE, 65K) — alias compat
+  - fast → masheen (4B, 16K) — low-latency simple tasks
+- Reasoning/premium: offline (27B dense not loaded)
+- Observability: Prometheus (:9090) + Grafana (:3000) scraping light-0, light-1, masheen with tier/node labels
 - CLI: `./sswai start|stop|health|gpu|metrics|test` (yak), `./masheen start|stop|health|gpu|test` (masheen)
 - Systemd: `sudo systemctl start|stop|status sswai` (yak), `sswai-masheen.service` (masheen)
 - Legacy scripts still available: ./start-14b-4worker.sh (E), ./start-32b.sh (F), ./start-30b-moe.sh (H)
@@ -286,10 +297,10 @@ Key Files:
 - docker-compose.32b-1per-gpu.yml + .env.32b-1per-gpu — Config F: 2 workers 1/GPU, 32B-AWQ, 49K context
 - docker-compose.32b-gpu1.yml + .env.32b-gpu1 — Config G: 1 worker GPU 1, 32B-AWQ, 49K context
 - docker-compose.30b-moe.yml + .env.30b-moe — Config H: 2 workers 1/GPU, 30B-MoE-AWQ, 64K context
-- docker-compose.3tier.yml + .env.3tier — Config I: 3-tier (heavy GPU 1, light/fast GPU 0 ×2, fast-small masheen)
-- gateway/models.3tier.yaml — 3-tier model registry (heavy→27B, light/fast→30B MoE, fast-small→4B)
+- docker-compose.3tier.yml + .env.3tier — Config I: 3-tier (reasoning/premium GPU 1 27B dense, heavy GPU 0 30B MoE, light masheen 4B)
+- gateway/models.3tier.yaml — 3-tier model registry (reasoning/premium→27B dense, heavy→30B MoE, light→4B)
 - docker-compose.observability.yml — Prometheus + Grafana, shares sswai_default network (uses 3tier Prometheus config)
-- prometheus/prometheus.3tier.yml — 4-target scrape config with tier/node labels (model-heavy, model-0, model-1, masheen)
+- prometheus/prometheus.3tier.yml — 3-target scrape config with tier/node labels (light-0, light-1, masheen)
 - prometheus/prometheus.{14b-4worker,32b,32b-gpu1,30b-moe}.yml — legacy per-profile scrape configs
 - grafana/dashboards/vllm.json — 12-panel vLLM dashboard with tier/instance dropdown filters (auto-provisioned)
 - docker-compose.yml — 7 services: redis, heavy-0/1, light-0/1, gateway, loader
@@ -356,16 +367,17 @@ Implementation Status:
 26. ✅ Production CLI — unified `./sswai` script (start/stop/restart/status/health/logs/gpu/metrics/test/config) wired to Config H
 27. ✅ Length-exceeded mitigation — raised max_model_len from 49,152 to 65,536 (MoE native 262K, no rope scaling); should eliminate most of the 5.2% length-exceeded tail
 28. ✅ Distributed Cluster — masheen node (RTX 2080, Qwen3-4B-AWQ) joined via WireGuard; both nodes systemd boot-start
-29. ✅ Fast Tier Isolation — removed masheen from yak light pool (was degrading 33% of requests); added masheen to Prometheus; comparative analysis confirms 4B viable for gates/classification/extraction (infra#163)
+29. ✅ Light Tier Isolation — removed masheen from yak heavy pool (was degrading 33% of requests); added masheen to Prometheus; comparative analysis confirms 4B viable for gates/classification/extraction (infra#163)
 30. ✅ Platform Reframe — general-purpose private-network AI backbone, not SSW-specific; master control agent (traptop10k-claude) designated (infra#166)
 31. ✅ Masheen model upgrade — Qwen3-4B-Instruct-2507-AWQ running (Eslzzyl community AWQ, XFORMERS backend for sm_75)
 32. ✅ Repo Migration — archived jrtorrez31337/ssw-llm-server, created jrtorrez31337/llm-fabric with full history
-33. ✅ Config I — 3-tier architecture: Qwen3.5-27B dense (GPU 1, heavy/premium/reasoning, 65K), 2× 30B MoE (GPU 0, light/fast/fast-big, 16K), masheen 4B (fast-small, 16K); served_name routing for cross-pool worker mapping
+33. ✅ Config I — 3-tier architecture: Qwen3.5-27B dense (GPU 1, reasoning/premium, 65K), 30B MoE (GPU 0, heavy, 65K), masheen 4B (light, 16K); served_name routing for cross-pool worker mapping
 34. ✅ Thinking Control — per-alias: heavy/premium suppress thinking, reasoning alias enables chain-of-thought; fixed qwen3_5 model type in registry scanner
 35. ✅ API Key Support — gateway accepts Bearer tokens; open by default (GATEWAY_API_KEYS), restrictable
-36. ✅ fast-big/fast-small Split — fast-big = local 30B MoE only, fast-small = masheen only; original fast alias = all 3 workers
-37. ✅ 3-Tier Observability — Prometheus scrapes all 4 workers with tier/node labels; Grafana dashboard updated with tier/instance filter dropdowns
-38. Next: Update sswai CLI + systemd for Config I; update docs for general-purpose consumers
+36. ✅ Alias Restructure — semantic naming: light=4B masheen, heavy=30B MoE (GPU 0), reasoning=27B dense thinking-on (GPU 1), premium=27B dense thinking-off (GPU 1)
+37. ✅ 3-Tier Observability — Prometheus scrapes 3 workers with tier/node labels; Grafana dashboard updated with tier/instance filter dropdowns
+38. ✅ Config J — capacity mode: both A40s run identical 30B MoE (light-0 GPU 0, light-1 GPU 1), 65K context; light+heavy→both MoEs, fast→masheen 4B; reasoning/premium offline; standalone docker containers for independent GPU control (yaklog infra#188)
+39. Next: Update sswai CLI + systemd for Config J; update docs for general-purpose consumers
 
 ---
 
@@ -530,7 +542,7 @@ The inference platform has expanded to a two-node cluster.
 
 ### Cluster Topology
 
-- yak: 2x NVIDIA A40 (45+48 GB VRAM), WireGuard 10.200.0.1 — Primary gateway + 30B MoE workers
+- yak: 2x NVIDIA A40 (45+48 GB VRAM), WireGuard 10.200.0.1 — Primary gateway + heavy (30B MoE, GPU 0) + reasoning/premium (27B dense, GPU 1)
 - masheen: RTX 2080 (8 GB VRAM), WireGuard 10.200.0.2 — Secondary node, Qwen3-4B-Instruct-2507-AWQ
 
 ### WireGuard Overlay
@@ -546,7 +558,7 @@ Qwen/Qwen3-4B-Instruct-2507-AWQ (Eslzzyl community AWQ) — sized for RTX 2080 8
 - Weights: ~2.5 GB (AWQ INT4, group_size=128)
 - gpu-memory-utilization: 0.80
 - Max context: 16384 tokens
-- Aliases (on masheen local gateway): light, heavy, fast; (on yak gateway): part of fast + fast-small pools
+- Aliases (on masheen local gateway): light, heavy, fast; (on yak gateway): fast tier exclusively
 - Stored at: /data/models/Qwen/Qwen3-4B-Instruct-2507-AWQ/
 - vLLM 0.17 on sm_75 (Turing): requires VLLM_ATTENTION_BACKEND=XFORMERS (FA2 needs sm_80+)
 
@@ -558,22 +570,20 @@ Masheen runs its own full sswai stack (redis + vLLM + gateway + loader).
 - Managed by:         cd ~/sswai && ./masheen start|stop|health|gpu|test
 - Systemd service:    sswai-masheen.service (starts after Docker + wg-quick@wg0)
 
-### Integration with Yak Gateway (Config I)
+### Integration with Yak Gateway (Config J)
 
-Masheen is integrated into yak's gateway as part of the 3-tier Config I:
-- `fast` pool: masheen + model-0 + model-1 (3 workers total)
-- `fast-small` pool: masheen exclusively (for low-latency simple tasks)
-- NOT in light or heavy pools (those are yak-local only)
+Masheen is integrated into yak's gateway as the `fast` tier in Config J:
+- `fast` pool: masheen exclusively (4B, 16K context, low-latency simple tasks)
+- NOT in light or heavy pools (those are yak-local A40 GPUs only)
 
-Masheen vLLM (:8001) is scraped by yak's Prometheus (instance: "masheen", tier: "fast-small", node: "masheen").
+Masheen vLLM (:8001) is scraped by yak's Prometheus (instance: "masheen", tier: "fast", node: "masheen").
 The raw vLLM port is bound 0.0.0.0 so yak Prometheus can reach it via WireGuard.
 
-Gateway uses `GATEWAY_POOL_SERVED_NAMES=fast:light,fast-big:light,fast-small:light` to translate
-pool names to vLLM served-model-names (all workers serve model="light" in vLLM).
+Gateway uses `GATEWAY_POOL_SERVED_NAMES=heavy:light` to translate pool names to vLLM served-model-names.
 
 ### Fast Tier (LIVE)
 
-Masheen serves the `fast-small` tier — quick-decision tasks (classification, yes/no gates,
+Masheen serves the `fast` tier — quick-decision tasks (classification, yes/no gates,
 extraction, tool calls) where latency matters more than reasoning depth.
 
 Analysis (infra#163): 4B is equivalent to 30B on gates/classification/extraction/tool calls,

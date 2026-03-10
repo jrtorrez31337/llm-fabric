@@ -140,6 +140,8 @@ class Settings(BaseSettings):
     fast_workers: str = ""
     fast_big_workers: str = ""
     fast_small_workers: str = ""
+    reasoning_workers: str = ""
+    premium_workers: str = ""
 
     # Pool→served-model-name overrides (comma-separated pool:name pairs)
     # e.g. "fast:light" means workers in "fast" pool respond to model="light"
