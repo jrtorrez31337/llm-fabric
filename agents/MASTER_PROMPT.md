@@ -382,7 +382,8 @@ Implementation Status:
 37. ✅ 3-Tier Observability — Prometheus scrapes 3 workers with tier/node labels; Grafana dashboard updated with tier/instance filter dropdowns
 38. ✅ Config J — capacity mode with asymmetric context: light-0 (GPU 0, 65K), light-1 (GPU 1, 262K); fast→masheen 16K, light→both GPUs (client 64K), heavy→GPU 1 only (client 128K, actual 262K); compose-managed with pinned container names; reasoning/premium offline (yaklog infra#188)
 39. ✅ GPU 1 thermal shutdown + recovery — A40 hit thermal protection (~101°C), PCI reset failed, reboot recovered GPU 1. Sysadmin agent deployed thermal management tool. Post-reboot temps: 58-63°C. See agents/HARDWARE_ISSUES.md
-40. Next: Update sswai CLI + systemd for Config J; update docs for general-purpose consumers
+40. 📋 Upgrade candidate if performance degrades: Qwen3-30B-A3B-Thinking-2507 AWQ — drop-in replacement (same arch, ~17GB, hermes parser), BFCL 72.4 (+7.3), LCB 66.0 (+22.8), MMLU-Pro 80.9 (+2.5). AWQ quants: stelterlab or cpatonn. Also evaluated: Qwen3-Coder-30B-A3B (BFCL 70.8, coding focus), GLM-4.7-Flash (weak tools), Nemotron-3-Nano-30B (weak IFEval), Qwen3.5-35B-A3B (best benchmarks but 25GB AWQ, needs TP=2)
+41. Next: Update sswai CLI + systemd for Config J; update docs for general-purpose consumers
 
 ---
 
