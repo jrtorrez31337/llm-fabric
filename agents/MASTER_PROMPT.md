@@ -321,6 +321,7 @@ Key Files:
 - scripts/load_test.py — concurrent load testing tool
 - agents/YAKLOG_GUIDE.md — yaklog inter-agent messaging reference (local-only, gitignored)
 - agents/MODEL_BAKEOFF_RUNBOOK.md — operational runbook for isolated bakeoff trials
+- agents/HARDWARE_ISSUES.md — hardware failure log (GPU thermals, driver errors, recovery steps)
 - sswai — production CLI for yak node (start/stop/restart/status/health/logs/gpu/metrics/test/config)
 - sswai.service — systemd unit for yak boot-start (installed to /etc/systemd/system/)
 - masheen — production CLI for masheen node (start/stop/restart/status/health/logs/gpu/test/config)
@@ -377,7 +378,8 @@ Implementation Status:
 36. ✅ Alias Restructure — semantic naming: light=4B masheen, heavy=30B MoE (GPU 0), reasoning=27B dense thinking-on (GPU 1), premium=27B dense thinking-off (GPU 1)
 37. ✅ 3-Tier Observability — Prometheus scrapes 3 workers with tier/node labels; Grafana dashboard updated with tier/instance filter dropdowns
 38. ✅ Config J — capacity mode: both A40s run identical 30B MoE (light-0 GPU 0, light-1 GPU 1), 65K context; light+heavy→both MoEs, fast→masheen 4B; reasoning/premium offline; standalone docker containers for independent GPU control (yaklog infra#188)
-39. Next: Update sswai CLI + systemd for Config J; update docs for general-purpose consumers
+39. ⚠️ GPU 1 thermal shutdown — A40 hit thermal protection (~101°C), driver lost handle, PCI reset failed; reboot required. Both GPUs running hot (0% fan = passive cooling, needs chassis airflow). See agents/HARDWARE_ISSUES.md
+40. Next: Post-reboot — verify GPU 1 recovery, address thermal cooling, update sswai CLI + systemd for Config J
 
 ---
 
