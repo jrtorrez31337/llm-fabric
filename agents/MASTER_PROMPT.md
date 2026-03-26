@@ -273,21 +273,22 @@ Three-Way Bakeoff Verdict (E vs F vs H, same code, 12 agents, yaklog infra#137, 
 - Config H concern: 6.5% length-exceeded rate needs investigation (thinking leak, model verbosity, or max_model_len tuning)
 - Recommendation: Config H (30B MoE) for production, with length-exceeded mitigation as next priority
 
-Current Runtime Snapshot (2026-03-10):
+Current Runtime Snapshot (2026-03-26):
 - Cluster: 2-node (yak + masheen) via WireGuard overlay (10.200.0.0/24)
-- Yak: Config J RUNNING — capacity mode (compose-managed):
+- Yak: Config J RUNNING — capacity mode (compose-managed, systemd boot-start):
   - GPU 0: Qwen3-30B-A3B MoE AWQ (light-0, 0.90 util, 65K context) — light pool
   - GPU 1: Qwen3-30B-A3B MoE AWQ (light-1, 0.90 util, 262K context) — light + heavy pools (cooler GPU)
 - Masheen: Qwen3-4B-Instruct-2507-AWQ × 1 worker (RTX 2080) — fast pool
 - Gateway routes 3 aliases across 3 workers on 2 nodes:
   - fast → masheen (4B, 16K) — low-latency simple tasks
-  - light → light-0 + light-1 (30B MoE) — client believes 64K limit
+  - light → light-0 + light-1 (30B MoE) — client believes 64K limit, routing confirmed balanced 50/50
   - heavy → light-1 only (30B MoE, 262K actual) — client believes 128K limit
 - Reasoning/premium: offline (27B dense not loaded)
 - Observability: Prometheus (:9090) + Grafana (:3000) scraping light-0, light-1, masheen with tier/node labels
-- CLI: `./sswai start|stop|health|gpu|metrics|test` (yak), `./masheen start|stop|health|gpu|test` (masheen)
-- Systemd: `sudo systemctl start|stop|status sswai` (yak), `sswai-masheen.service` (masheen)
+- CLI: `./sswai start|stop|health|gpu|metrics|test|config` (yak), `./masheen start|stop|health|gpu|test` (masheen)
+- Systemd: `sudo systemctl start|stop|status sswai` (yak — Config J), `sswai-masheen.service` (masheen)
 - Legacy scripts still available: ./start-14b-4worker.sh (E), ./start-32b.sh (F), ./start-30b-moe.sh (H)
+- Latest performance (5-agent rogue run, 757 req): TTFT 1.6s p50, E2E 2.3s p50, 0 preemptions, 0.7% length-exceeded
 
 Key Files:
 - start-14b-4worker.sh / stop-14b-4worker.sh — start/stop Config E (14B × 4) + observability
@@ -383,7 +384,10 @@ Implementation Status:
 38. ✅ Config J — capacity mode with asymmetric context: light-0 (GPU 0, 65K), light-1 (GPU 1, 262K); fast→masheen 16K, light→both GPUs (client 64K), heavy→GPU 1 only (client 128K, actual 262K); compose-managed with pinned container names; reasoning/premium offline (yaklog infra#188)
 39. ✅ GPU 1 thermal shutdown + recovery — A40 hit thermal protection (~101°C), PCI reset failed, reboot recovered GPU 1. Sysadmin agent deployed thermal management tool. Post-reboot temps: 58-63°C. See agents/HARDWARE_ISSUES.md
 40. 📋 Upgrade candidate if performance degrades: Qwen3-30B-A3B-Thinking-2507 AWQ — drop-in replacement (same arch, ~17GB, hermes parser), BFCL 72.4 (+7.3), LCB 66.0 (+22.8), MMLU-Pro 80.9 (+2.5). AWQ quants: stelterlab or cpatonn. Also evaluated: Qwen3-Coder-30B-A3B (BFCL 70.8, coding focus), GLM-4.7-Flash (weak tools), Nemotron-3-Nano-30B (weak IFEval), Qwen3.5-35B-A3B (best benchmarks but 25GB AWQ, needs TP=2)
-41. Next: Update sswai CLI + systemd for Config J; update docs for general-purpose consumers
+41. ✅ sswai CLI + systemd updated to Config J — CLI now uses docker-compose.capacity.yml/.env.capacity, systemd unit description updated, daemon-reload applied. Previous Config H references replaced.
+42. ✅ Power-loss recovery (2026-03-25) — unclean power pull, system rebooted. Workers survived via restart:unless-stopped. Gateway was down (systemd ran wrong compose). Fixed: started Config J gateway, removed 4 stale Config H containers, updated systemd to Config J.
+43. ✅ Rogue agent run analysis — 5 orphaned NPC agents (from Mar 11) discovered running on game VM after power-loss reboot. 757 requests captured. Key findings: routing perfectly balanced 50/50 (was 8/92 — game team switched configs from heavy→light per infra #192), TTFT 1.6s p50 (best ever), E2E 2.3s p50, length-exceeded 0.7% (best ever), 0 preemptions, 0 errors. See yaklog infra#330.
+44. Next: update docs for general-purpose consumers; add thermal alerts to observability; investigate masheen fast tier underutilization
 
 ---
 

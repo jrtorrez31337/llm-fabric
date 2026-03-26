@@ -1,5 +1,44 @@
 # Hardware Issues Log
 
+## 2026-03-25: Unclean Power Loss (Plug Pulled)
+
+### Symptoms
+- Yak lost power abruptly (physical plug pulled due to fan noise complaint)
+- System rebooted automatically ~4h before discovery
+- Gateway was down — game VM traffic getting no responses
+
+### What Survived (Docker restart:unless-stopped)
+- Both A40 GPUs — alive, 48°C / 43°C at idle
+- light-0 + light-1 (vLLM workers) — healthy, serving requests
+- Redis — healthy
+- Prometheus + Grafana — running
+
+### What Was Down
+- **Gateway**: systemd ran Config H compose (wrong file — sswai.service not yet updated), created dead `sswai-gateway-1`. Config J gateway (`sswai-gateway`) never started.
+- **Masheen fast tier**: WireGuard reachable but vLLM on port 8001 not responding. Required restart on masheen box.
+- **Stale containers**: 4 Config H containers in "Created" state (sswai-gateway-1, sswai-model-0-1, sswai-model-1-1, sswai-loader-1)
+
+### Root Cause
+Physical power interruption. systemd auto-start used wrong compose file (Config H instead of Config J). Workers survived on Docker restart policy. Gateway did not because Config J gateway was never registered with the old systemd unit.
+
+### Resolution
+1. Removed 4 stale Config H containers
+2. Started Config J gateway via `docker compose -p sswai -f docker-compose.capacity.yml --env-file .env.capacity up -d gateway`
+3. Updated systemd unit to Config J: description, compose file, env file
+4. `systemctl daemon-reload` applied
+5. Masheen vLLM restarted separately
+6. Full fleet verified healthy: all 3 Prometheus targets up, all gateway aliases serving
+
+### Action Items
+- [x] Start Config J gateway — done
+- [x] Clean up stale Config H containers — done
+- [x] Update systemd sswai.service → Config J — done
+- [x] Restart masheen vLLM — done
+- [x] Verify full fleet operational — done
+- [ ] Consider UPS for yak to prevent future unclean shutdowns
+
+---
+
 ## 2026-03-10: GPU 1 Thermal Shutdown + Driver Failure
 
 ### Symptoms

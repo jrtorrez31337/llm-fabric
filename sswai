@@ -13,21 +13,25 @@
 #   ./sswai test [N]            Quick smoke test (N requests, default 3)
 #   ./sswai config              Show active configuration
 #
-# Production config: Config H (Qwen3-30B-A3B MoE AWQ, 2 workers, 1/GPU)
+# Production: Config J — Capacity Mode
+#   GPU 0: light-0 (30B MoE AWQ, 65K ctx)
+#   GPU 1: light-1 (30B MoE AWQ, 262K ctx)
+#   Masheen: fast tier (4B AWQ, 16K ctx)
+#   Aliases: fast→masheen, light→both GPUs, heavy→GPU 1 only
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
 # --- Configuration ---
-COMPOSE_FILE="docker-compose.30b-moe.yml"
+COMPOSE_FILE="docker-compose.capacity.yml"
 OBS_COMPOSE_FILE="docker-compose.observability.yml"
-ENV_FILE=".env.30b-moe"
-PROM_CONFIG="prometheus/prometheus.30b-moe.yml"
+ENV_FILE=".env.capacity"
+PROM_CONFIG="prometheus/prometheus.3tier.yml"
 PROJECT="sswai"
 GATEWAY_PORT=8000
 PROM_PORT=9090
 GRAFANA_PORT=3000
-PROFILE_NAME="Config H — Qwen3-30B-A3B MoE AWQ × 2 workers (1/GPU), 64K context"
+PROFILE_NAME="Config J — Qwen3-30B-A3B MoE AWQ × 2 (GPU 0: 65K, GPU 1: 262K) + masheen 4B fast"
 
 # --- Helpers ---
 compose() {
